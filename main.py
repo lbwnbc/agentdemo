@@ -1,47 +1,17 @@
-"""第 1 步验收 demo：天气工具 + LLM 适配层。"""
-import json
-
+"""第 2 步验收 demo：天气工具 + 工具注册表。"""
 from litagent.config import load_settings
 from litagent.llm.zhipu import ZhipuClient
+from litagent.tools import build_default_registry
+from litagent.types import ToolCall
 
 
-def get_weather(city, date=None):
-    return {"status": "successful", "message": "27°C 晴"}
-
-
-TOOLS = [
-    {
-        "type": "function",
-        "function": {
-            "name": "get_weather",
-            "description": "查询指定城市在指定日期的天气情况",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "city": {"type": "string", "description": "城市名，如北京"},
-                    "date": {"type": "string", "description": "日期，格式YYYY-MM-DD"},
-                },
-                "required": ["city"],
-            },
-        },
-    }
-]
-
-
-def call_tool(name, arguments):
-    if name == "get_weather":
-
-        return get_weather(**arguments)
-    return {"status": "error", "message": "未知工具: {}".format(name)}
-
-
-def agent_loop(user_input, client, max_turns=5):
+def agent_loop(user_input, client, registry, max_turns=5):
     messages = [
         {"role": "system", "content": "你是一个智能助手。若用户需要查询天气，请调用get_weather"},
         {"role": "user", "content": user_input},
     ]
     for turn in range(1, max_turns + 1):
-        response = client.chat(messages, tools=TOOLS)
+        response = client.chat(messages, tools=registry.specs())
         messages.append(response.message)
 
         usage = response.usage
@@ -57,31 +27,11 @@ def agent_loop(user_input, client, max_turns=5):
         if not response.tool_calls:
             return response.content
 
-        for tool_call in response.tool_calls:
-            name = tool_call["function"]["name"]
-            try:
-                arguments = json.loads(tool_call["function"]["arguments"] or "{}")
-            except json.JSONDecodeError as exc:
-                messages.append(
-                    {
-                        "role": "tool",
-                        "tool_call_id": tool_call["id"],
-                        "content": json.dumps(
-                            {"status": "error", "message": "参数解析失败: {}".format(exc)},
-                            ensure_ascii=False,
-                        ),
-                    }
-                )
-                continue
-
-            result = call_tool(name, arguments)
-            messages.append(
-                {
-                    "role": "tool",
-                    "tool_call_id": tool_call["id"],
-                    "content": json.dumps(result, ensure_ascii=False),
-                }
-            )
+        for raw_call in response.tool_calls:
+            call = ToolCall.from_raw(raw_call)
+            print("call tool {}".format(call.name))
+            result = registry.execute(call)
+            messages.append(result.to_message())
 
     return "reach max turns limit"
 
@@ -89,7 +39,8 @@ def agent_loop(user_input, client, max_turns=5):
 def main():
     settings = load_settings()
     client = ZhipuClient(settings)
-    print(agent_loop("今天北京天气如何？", client))
+    registry = build_default_registry()
+    print(agent_loop("今天北京天气如何？", client, registry))
 
 
 if __name__ == "__main__":
