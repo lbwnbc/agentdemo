@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# 环境变量与密钥
+.env
+.env.*
+!.env.example
+
+# IDE
+.idea/
+.vscode/
+
+# 运行产物
+workspace/
+.cache/
+logs/
+*.pdf
