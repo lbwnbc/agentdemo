@@ -48,13 +48,15 @@ class ToolResult:
     tool_call_id: str
     content: str
     is_error: bool = False
+    terminate: bool = False
 
     @classmethod
-    def error(cls, tool_call_id, message):
+    def error(cls, tool_call_id, message, terminate=False):
         return cls(
             tool_call_id=tool_call_id,
             content=json.dumps({"status": "error", "message": message}, ensure_ascii=False),
             is_error=True,
+            terminate=terminate,
         )
 
     def to_message(self):

@@ -94,18 +94,33 @@ def _run(
     on_event,
     resolve_pending,
 ):
+    usage_total = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+    steps = 0
+    content = ""
+    stop_reason = "max_turns"
+    _emit(on_event, AgentEvent.AGENT_START, messages=messages)
+
     if resolve_pending:
         calls = _start_pending_tool_calls(messages[-1] if messages else None)
         if calls is None:
             raise ValueError("最后一条消息不是待执行的工具调用，无法续跑")
         results = _execute_tool_calls(registry, calls, max_workers, on_event)
         messages.extend(result.to_message() for result in results)
-
-    usage_total = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
-    steps = 0
-    content = ""
-    stop_reason = "max_turns"
-    _emit(on_event, AgentEvent.AGENT_START, messages=messages)
+        if any(result.terminate for result in results):
+            _emit(
+                on_event,
+                AgentEvent.AGENT_END,
+                stop_reason="terminated",
+                steps=0,
+                usage=usage_total,
+            )
+            return LoopResult(
+                content=content,
+                messages=messages,
+                stop_reason="terminated",
+                steps=0,
+                usage=usage_total,
+            )
 
     while steps < max_turns:
         if should_stop is not None and should_stop():
@@ -134,6 +149,10 @@ def _run(
         calls = [ToolCall.from_raw(raw) for raw in response.tool_calls]
         results = _execute_tool_calls(registry, calls, max_workers, on_event)
         messages.extend(result.to_message() for result in results)
+
+        if any(result.terminate for result in results):
+            stop_reason = "terminated"
+            break
 
         if token_budget is not None and usage_total["total_tokens"] >= token_budget:
             stop_reason = "token_budget"
