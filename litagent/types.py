@@ -6,7 +6,8 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from enum import Enum
 
 
 class ToolError(Exception):
@@ -58,4 +59,21 @@ class ToolResult:
 
     def to_message(self):
         return {"role": "tool", "tool_call_id": self.tool_call_id, "content": self.content}
+
+
+class AgentEvent(str, Enum):
+    """循环对外发出的事件类型。"""
+
+    AGENT_START = "agent_start"
+    TURN_START = "turn_start"
+    MESSAGE = "message"
+    TOOL_START = "tool_start"
+    TOOL_END = "tool_end"
+    AGENT_END = "agent_end"
+
+
+@dataclass
+class Event:
+    type: AgentEvent
+    data: dict = field(default_factory=dict)
 
