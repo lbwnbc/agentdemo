@@ -2,14 +2,11 @@
 from litagent.agent import run_loop
 from litagent.config import load_settings
 from litagent.llm.zhipu import ZhipuClient
+from litagent.prompt import load_system_prompt
 from litagent.tools import build_default_registry
 from litagent.types import AgentEvent
 
-SYSTEM_PROMPT = (
-    "你是一个文献调研助手。用户给出研究主题时，先用 search_arxiv 检索论文，"
-    "必要时用 get_arxiv_paper 获取单篇元数据。回答时列出 arXiv 编号、标题和一句话结论，"
-    "不要编造未检索到的文献。"
-)
+SYSTEM_PROMPT = load_system_prompt()
 
 
 def print_event(event):
