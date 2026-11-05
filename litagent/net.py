@@ -84,6 +84,12 @@ class HttpClient:
         self.session = session or requests.Session()
 
     def get_json(self, url, params=None, headers=None):
+        return self._get(url, params, headers, as_json=True)
+
+    def get_text(self, url, params=None, headers=None):
+        return self._get(url, params, headers, as_json=False)
+
+    def _get(self, url, params, headers, as_json):
         key = "{}?{}".format(url, json.dumps(params or {}, sort_keys=True))
         if self.cache is not None:
             cached = self.cache.get(key)
@@ -102,10 +108,13 @@ class HttpClient:
                 last_error = exc
             else:
                 if response.status_code == 200:
-                    try:
-                        value = response.json()
-                    except ValueError:
-                        raise HttpError("响应不是合法 JSON: {}".format(url))
+                    if as_json:
+                        try:
+                            value = response.json()
+                        except ValueError:
+                            raise HttpError("响应不是合法 JSON: {}".format(url))
+                    else:
+                        value = response.text
                     if self.cache is not None:
                         self.cache.set(key, value)
                     return value

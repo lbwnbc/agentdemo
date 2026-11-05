@@ -5,7 +5,11 @@ from litagent.llm.zhipu import ZhipuClient
 from litagent.tools import build_default_registry
 from litagent.types import AgentEvent
 
-SYSTEM_PROMPT = "你是一个智能助手。若用户需要查询天气，请调用 get_weather。"
+SYSTEM_PROMPT = (
+    "你是一个文献调研助手。用户给出研究主题时，先用 search_arxiv 检索论文，"
+    "必要时用 get_arxiv_paper 获取单篇元数据。回答时列出 arXiv 编号、标题和一句话结论，"
+    "不要编造未检索到的文献。"
+)
 
 
 def print_event(event):
@@ -43,7 +47,7 @@ def main():
     registry = build_default_registry()
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
-        {"role": "user", "content": "今天北京天气如何？"},
+        {"role": "user", "content": "帮我检索 3 篇关于 LLM agent memory 的论文，并简要总结它们各自关注什么。"},
     ]
     result = run_loop(client, registry, messages, max_turns=6, on_event=print_event)
     print(result.content)
