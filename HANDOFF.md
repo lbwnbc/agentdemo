@@ -1,6 +1,6 @@
 # 交接文档：文献调研智能体（agentdemo）
 
-> 用途：在上下文切换 / 换人接手时快速恢复项目状态。最后更新于第 7 步完成时。
+> 用途：在上下文切换 / 换人接手时快速恢复项目状态。最后更新于第 8 步完成时。
 
 ## 一、项目目标
 
@@ -12,7 +12,7 @@
 
 ## 二、当前状态（一句话）
 
-框架层第 1–7 步已完成并真实跑通：检索 arXiv → 精读 PDF → 记录证据笔记 → 带引用综合 → 会话持久化/续聊 → 超阈值上下文压缩。剩余第 8（工作流编排）、9（评测与交互）两阶段，以及被推迟的 Skills。
+框架层第 1–8 步已完成并真实跑通：检索 arXiv → 精读 PDF → 记录证据笔记 → 带引用综合 → 会话持久化/续聊 → 超阈值上下文压缩 → 三阶段工作流编排。剩余第 9（评测与交互），以及被推迟的 Skills。
 
 ## 三、提交记录
 
@@ -28,14 +28,10 @@
 | `6aacabc` | 第 6 步：调研 SOP 系统提示词（移除 get_weather） |
 | `50c3d8c` | 第 7 步：会话持久化 + 上下文压缩 |
 | `5026ffa` | 本交接文档初版 |
+| `f425419` | 交接文档补充推送状态与网络诊断 |
+| `e10b18a` | 第 8 步：研究工作流编排（Plan → Collect → Synthesize） |
 
-**注意：`6aacabc` / `50c3d8c` / `5026ffa` 以及本文件的后续更新都还没推到 GitHub。** 本机到 github.com:443 的 TLS 握手与连接均失败（详见第八节第 1 条），本地 `main` 领先 `origin/main` 若干提交。网络恢复后执行：
-
-```powershell
-git push origin main
-```
-
-推送成功后请顺手把本表补上自己的提交号，免得后面接手的人误判已同步。
+**当前已全部推送到 GitHub**（`origin/main` 与本地一致）。旧智谱 key 已在后台禁用并更换，新 key 只存在本地 `.env`（已 gitignore）。
 
 ## 四、代码地图
 
@@ -49,8 +45,10 @@ litagent/
   agent/loop.py               run_loop / run_loop_continue、终止条件、并行工具、压缩钩子
   compaction.py               按用户轮次切分 + 摘要历史（保留工具配对）
   session.py                  JSONL 记录、历史恢复、Markdown 导出、reset
+  workflow.py                 三阶段编排：阶段重试/resume、产物落盘、引用校验
   prompt/system.md            调研 SOP、引用规则、输出格式
-  prompt/__init__.py          load_system_prompt()
+  prompt/__init__.py          load_system_prompt() / load_workflow_prompt()
+  prompt/workflow/*.md        plan / collect / outline / report 四份阶段提示词
   net.py                      RateLimiter / DiskCache / HttpClient（get_text、get_json）
   workspace.py                workspace/<session>/ 约定，LITAGENT_WORKSPACE / LITAGENT_SESSION
   tools/base.py               Tool 协议、JSON Schema 校验、异常归一化、文本截断
@@ -59,6 +57,7 @@ litagent/
   tools/arxiv.py              search_arxiv / get_arxiv_paper / parse_arxiv_feed
   tools/pdf.py                fetch_pdf / read_paper（按页窗口、字符上限）
   tools/notes.py              save_note / search_notes（notes.jsonl）
+  tools/workflow_tools.py     submit_plan / submit_evidence / submit_outline / submit_report
   tools/__init__.py           build_default_registry()（6 个工具）
 requirements.txt              requests、PyPDF2==3.0.1
 ROADMAP.md                    原始分步计划与 pi 代码参考
@@ -75,6 +74,9 @@ ROADMAP.md                    原始分步计划与 pi 代码参考
 5. **PDF 解析双后端**：先试 `pypdf`，失败回落 `PyPDF2`。原因是本机 Python 3.7，新版 pypdf 依赖 `typing.Protocol`（3.8+），导入即失败。`requirements.txt` 固定 `PyPDF2==3.0.1`。
 6. **工具治理用钩子 + 路径守卫**，没有实现完整的 project-trust / file-mutation-queue；真有并发写文件需求时再补。
 7. **提示词决定行为**：第 6 步换成 SOP 后，模型从“检索+罗列”变成“检索 → 证据固化 → 带引用综合”，并会自动去重上一轮已交付的论文。
+8. **工作流用“提交工具”而不是解析文本**：`submit_plan` / `submit_evidence` / `submit_outline` / `submit_report` 把结构化产物直接写进 `StageStore`；前三个提交后靠 `ToolResult.terminate` 立即结束阶段。这样不需要从模型自由文本里抠 JSON，也不会因为格式抖动而失败。
+9. **阶段可断点续跑**：产物落盘后 `--workflow --resume` 会跳过 plan/collect/outline。真实跑时 report 阶段连续两次 read timeout，靠这个省掉了重跑 collect 的 23 万 tokens。
+10. **引用校验在图之外**：`validate_citations()` 只认证据库里的 `[eN]`、arXiv 号和 DOI，校验不过会把问题清单回喂给模型重写一次；仍不过就降级，把问题写进 `report.md` 末尾而不是丢掉报告。
 
 ## 六、运行方式
 
@@ -90,6 +92,13 @@ python main.py --export
 
 # 4) 修改压缩阈值（默认 30000）
 $env:LITAGENT_COMPACT_THRESHOLD=3000
+
+# 5) 三阶段工作流：产物写 workspace/<session>/workflow/
+python main.py --workflow "LLM agent memory 的研究现状"
+
+# 6) 阶段失败后接着跑（跳过已落盘的 plan/evidence/outline）
+$env:ZHIPU_TIMEOUT=300   # 报告这类长输出容易撞默认 60s 超时
+python main.py --workflow --resume "同一主题"
 ```
 
 可用环境变量：`ZHIPU_API_KEY`、`ZHIPU_BASE_URL`、`ZHIPU_MODEL`、`ZHIPU_TEMPERATURE`、`ZHIPU_TIMEOUT`、`ZHIPU_MAX_RETRIES`、`LITAGENT_COMPACT_THRESHOLD`、`LITAGENT_WORKSPACE`、`LITAGENT_SESSION`。
@@ -103,27 +112,31 @@ $env:LITAGENT_COMPACT_THRESHOLD=3000
 - **第 5 步**：arXiv 真实检索成功；离线验证 Feed 解析、分页箭头、PDF 文本抽取、页码钳制、笔记编号与检索。
 - **第 6 步**：真实跑通 4 轮 / 27896 tokens，输出四段式报告并带 `[n1]` 引用。
 - **第 7 步**：会话往返/导出/空会话报错；真实 `--resume` 1 轮直接复用历史；真实压缩触发 `[compact] messages 10 -> 7`，且模型记得上一轮论文编号并主动去重。
+- **第 8 步**：离线验证阶段提交、产物落盘、非法引用触发 retry 后通过、未提交产物抛 `WorkflowError`、`resume` 只跑失败阶段；真实跑通完整流程——plan 4 子问题、collect 10 轮 7 篇 PDF 产出 12 条证据卡（23.5 万 tokens）、outline 2345 字、report 6423 字；引用校验 12/12 全部被引用、零非法 id/arXiv 号/DOI。产出报告里两处「证据不足」是模型主动标注，不是漏写。
 
 ## 八、已知限制与坑
 
-1. **GitHub 推送不稳定 / 当前不可用**：多次出现 `Failed to connect to github.com port 443`。2026-11-05 复测：TCP 443 可达（`Test-NetConnection` 为 True），但 `curl https://github.com` 返回 `http=000`、curl 退出码 35（TLS 连接失败），`git push` 无论是否加 `http.version=HTTP/1.1` 都失败。与代码、凭据、sandbox 无关，属于本机网络环境问题。恢复后重试 `git push origin main` 即可。
-2. **arxiv.org/pdf 下载在本网络超时**，`export.arxiv.org` API 正常。因此真实 PDF 下载链路未端到端验证过（解析逻辑本身已用本地构造 PDF 验证）。
-3. **GitHub 仓库是 public**，且早期 API key 曾明文出现在 `main.py` 和对话里，务必去智谱后台轮换。
-4. **缺少提交到仓库的自动化测试**：目前的验证脚本是临时的（写在 `%TEMP%`），删掉即失。第 9 步应把 golden set 与工具测试固化到 `tests/`。
-5. **笔记库按会话隔离**，没有跨会话的长期文献库；同一篇论文重复精读会产生重复笔记。
-6. **压缩摘要可能丢细节**：摘要由同一个模型生成，长会话多次压缩后早期实验数字可能失真，重要结论应尽早写入 `notes.jsonl`。
-7. **无上下文长度硬校验**：阈值默认 30000 tokens，按模型实际窗口需调（`LITAGENT_COMPACT_THRESHOLD`）。
+1. **GitHub 推送时好时坏**：2026-11-05 上午 TCP 可达但 TLS 握手失败（curl 退出码 35），同日下午已恢复正常推送。若再遇到 `Failed to connect to github.com port 443`，先 `git push` 重试，别急着查凭据。
+2. **长输出阶段容易超时**：report 一次要生成 7K+ completion tokens，默认 `ZHIPU_TIMEOUT=60` 会撞 read timeout。跑 `--workflow` 前建议设 `ZHIPU_TIMEOUT=300`。
+3. **PDF 下载恢复但不算稳定**：此前 `arxiv.org/pdf` 超时，2026-11-05 实测 7 篇全部下载成功。失败时 collect 提示词允许降级为摘要级证据（`kind=background`）。
+4. **GitHub 仓库是 public**，旧 key 已禁用更换；新 key 只在本地 `.env`。
+5. **缺少提交到仓库的自动化测试**：目前的验证脚本是临时的（写在 `%TEMP%`），删掉即失。第 9 步应把 golden set 与工具测试固化到 `tests/`。
+6. **笔记库按会话隔离**，没有跨会话的长期文献库；同一篇论文重复精读会产生重复笔记。
+7. **压缩摘要可能丢细节**：摘要由同一个模型生成，长会话多次压缩后早期实验数字可能失真，重要结论应尽早写入 `notes.jsonl`。
+8. **无上下文长度硬校验**：阈值默认 30000 tokens，按模型实际窗口需调（`LITAGENT_COMPACT_THRESHOLD`）。
+9. **工作流没有接入 session/compaction**：四个阶段各自独立统计用量，`--workflow` 不写 `session.jsonl`，也不能 `--export`；另外 `--workflow` 新跑会覆盖上一轮的四个产物文件。
+10. **collect 阶段成本高**：真实跑满 10 轮用了 23.5 万 tokens，因为每轮都携带检索摘要与 PDF 正文。后续可考虑按论文拆子代理、或把已读页压缩成证据再丢弃原文。
 
 ## 九、下一步（按建议顺序）
 
-1. **补齐并推送**（网络恢复后）：`git push origin main`。
-2. **第 8 步：研究工作流编排**。显式三阶段 Plan → Collect → Synthesize，产物落盘 `plan.json` / `evidence.jsonl` / `outline.md` / `report.md`。pi 参考：`agent-session-runtime.ts`（阶段状态）、`nested-tool-calls.ts`（子代理式嵌套调用）。
-3. **Skills（原第 6 步后半）**。`litagent/prompt/skills/*/SKILL.md` + `load_skill` 工具做渐进式披露。参考：`skills.ts`、`resource-loader.ts`。
-4. **第 9 步：评测与交互**。golden set（10 个主题）、指标（候选召回/引用真实率/证据覆盖率/工具失败率/成本），把离线测试固化进 `tests/`；先做 rich CLI，再考虑 Web。
-5. **增强检索**：Semantic Scholar 引文滚雪球（注意限速，建议申请 key）、跨会话文献库、去重。
+1. **Skills（原第 6 步后半，也是唯一还欠的框架能力）**。`litagent/prompt/skills/*/SKILL.md` + `load_skill` 工具做渐进式披露：主提示词只放索引，按需加载全文。参考 pi 的 `skills.ts`、`resource-loader.ts`。验收：开/关 skills 的产出可对比，引用格式统一。
+2. **第 9 步：评测与交互**。golden set（10 个主题 + 期望覆盖的关键工作）、指标（候选召回 / 引用真实率 / 证据覆盖率 / 工具失败率 / 成本），把 `%TEMP%` 里的验证脚本固化进 `tests/`；先做 rich CLI 渲染事件流，再考虑 Web。可以参考第 8 步的 12 条证据做一个小型回归样例。
+3. **增强检索**：Semantic Scholar 引文滚雪球（注意限速，建议申请 key）、跨会话文献库、去重。
+4. **工作流增强**（可选）：把 `--workflow` 的事件接进 `session.jsonl` 以支持 `--export`；collect 按论文拆子代理降低 23 万 tokens 的上下文成本；多主题运行时不覆盖旧产物。
 
-## 十、给接手者的三句话
+## 十、给接手者的四句话
 
 - 先读 `ROADMAP.md` 了解全貌，再读 `litagent/agent/loop.py`（所有能力的地基）。
 - 改工具就改 `tools/`，别把业务塞进 `loop.py`；loop 只依赖 `client.chat` 和 `registry` 两个接口。
 - 任何“让模型更聪明”的改动，优先改 `prompt/system.md`，而不是加代码分支。
+- 要改工作流，先看 `litagent/workflow.py` 的四个 `_run_stage` 调用点；阶段产物全靠提交工具落盘，别改成解析模型文本。
