@@ -35,6 +35,8 @@ def run_loop(
     max_workers=DEFAULT_MAX_WORKERS,
     should_stop=None,
     on_event=None,
+    compact_threshold=None,
+    compactor=None,
 ):
     """从当前消息开始跑循环；messages 会被就地追加。"""
     return _run(
@@ -47,6 +49,8 @@ def run_loop(
         should_stop,
         on_event,
         resolve_pending=False,
+        compact_threshold=compact_threshold,
+        compactor=compactor,
     )
 
 
@@ -59,6 +63,8 @@ def run_loop_continue(
     max_workers=DEFAULT_MAX_WORKERS,
     should_stop=None,
     on_event=None,
+    compact_threshold=None,
+    compactor=None,
 ):
     """续跑：先执行最后一条 assistant 消息里未完成的工具调用，再继续循环。"""
     return _run(
@@ -71,6 +77,8 @@ def run_loop_continue(
         should_stop,
         on_event,
         resolve_pending=True,
+        compact_threshold=compact_threshold,
+        compactor=compactor,
     )
 
 
@@ -93,11 +101,14 @@ def _run(
     should_stop,
     on_event,
     resolve_pending,
+    compact_threshold=None,
+    compactor=None,
 ):
     usage_total = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
     steps = 0
     content = ""
     stop_reason = "max_turns"
+    last_prompt_tokens = 0
     _emit(on_event, AgentEvent.AGENT_START, messages=messages)
 
     if resolve_pending:
@@ -128,9 +139,29 @@ def _run(
             break
 
         steps += 1
+
+        if (
+            compactor is not None
+            and compact_threshold is not None
+            and last_prompt_tokens >= compact_threshold
+        ):
+            compacted = compactor(messages)
+            if compacted:
+                before = len(messages)
+                messages[:] = compacted
+                _emit(
+                    on_event,
+                    AgentEvent.COMPACTED,
+                    before=before,
+                    after=len(messages),
+                    threshold=compact_threshold,
+                )
+                last_prompt_tokens = 0
+
         _emit(on_event, AgentEvent.TURN_START, step=steps)
 
         response = client.chat(messages, tools=registry.specs())
+        last_prompt_tokens = response.usage.get("prompt_tokens", 0)
         for key in usage_total:
             usage_total[key] += response.usage.get(key, 0)
         messages.append(response.message)

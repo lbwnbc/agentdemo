@@ -28,6 +28,7 @@ class Settings:
     temperature: float = 0.2
     timeout: float = 60.0
     max_retries: int = 3
+    compact_threshold: int = 30000
 
     @property
     def chat_url(self):
@@ -46,4 +47,7 @@ def load_settings():
         temperature=float(os.environ.get("ZHIPU_TEMPERATURE", Settings.temperature)),
         timeout=float(os.environ.get("ZHIPU_TIMEOUT", Settings.timeout)),
         max_retries=int(os.environ.get("ZHIPU_MAX_RETRIES", Settings.max_retries)),
+        compact_threshold=int(
+            os.environ.get("LITAGENT_COMPACT_THRESHOLD", Settings.compact_threshold)
+        ),
     )

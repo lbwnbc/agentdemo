@@ -69,6 +69,7 @@ class AgentEvent(str, Enum):
     AGENT_START = "agent_start"
     TURN_START = "turn_start"
     MESSAGE = "message"
+    COMPACTED = "compacted"
     TOOL_START = "tool_start"
     TOOL_END = "tool_end"
     AGENT_END = "agent_end"
