@@ -37,6 +37,9 @@ class ToolRegistry:
     def names(self):
         return sorted(self._tools)
 
+    def iter_tools(self):
+        return [self._tools[name] for name in sorted(self._tools)]
+
     def specs(self):
         return [self._tools[name].spec() for name in sorted(self._tools)]
 

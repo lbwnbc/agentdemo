@@ -60,6 +60,7 @@ class Tool:
     parameters: dict
     handler: Callable
     max_output_chars: int = DEFAULT_MAX_OUTPUT_CHARS
+    terminate: bool = False
 
     def spec(self):
         return {
@@ -90,4 +91,5 @@ class Tool:
         return ToolResult(
             tool_call_id=call.id,
             content=truncate_text(output, self.max_output_chars),
+            terminate=self.terminate,
         )

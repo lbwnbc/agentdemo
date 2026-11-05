@@ -1,4 +1,4 @@
-"""命令行入口：Agent Loop + 会话持久化。"""
+"""命令行入口：Agent Loop + 会话持久化；--workflow 走三阶段调研。"""
 import argparse
 
 from litagent.agent import run_loop
@@ -15,6 +15,7 @@ from litagent.session import (
 )
 from litagent.tools import build_default_registry
 from litagent.types import AgentEvent
+from litagent.workflow import WorkflowError, run_workflow
 
 SYSTEM_PROMPT = load_system_prompt()
 DEFAULT_QUESTION = "帮我检索 3 篇关于 LLM agent memory 的论文，并简要总结它们各自关注什么。"
@@ -59,11 +60,60 @@ def record_event(event):
         append_message(event.data["result"].to_message())
 
 
+def print_phase(name, status, info):
+    if status == "start":
+        print("[{}] start".format(name))
+    elif status == "done":
+        print(
+            "[{}] done: {} steps, {} tokens".format(
+                name,
+                info.get("steps", 0),
+                (info.get("usage") or {}).get("total_tokens", 0),
+            )
+        )
+    elif status in ("retry", "degraded"):
+        print("[{}] {}: {}".format(name, status, "；".join(info.get("problems") or [])))
+    elif status == "skipped":
+        print("[{}] skipped（复用已落盘产物）".format(name))
+    elif status == "failed":
+        print("[{}] failed".format(name))
+
+
+def run_workflow_mode(topic, resume=False):
+    settings = load_settings()
+    client = ZhipuClient(settings)
+    try:
+        result = run_workflow(
+            client,
+            build_default_registry(),
+            topic,
+            on_event=print_event,
+            on_phase=print_phase,
+            resume=resume,
+        )
+    except WorkflowError as exc:
+        raise SystemExit("工作流失败: {}".format(exc))
+
+    print()
+    print(result.report)
+    print()
+    for name, path in result.paths.items():
+        print("{}: {}".format(name, path))
+    print("总 tokens: {}".format(result.usage.get("total_tokens", 0)))
+    if result.issues:
+        print("注意：引用自检未通过，问题已写入 report.md 末尾")
+
+
 def main():
     parser = argparse.ArgumentParser(description="文献调研智能体")
     parser.add_argument("prompt", nargs="?", default=DEFAULT_QUESTION, help="研究主题或追问")
-    parser.add_argument("--resume", action="store_true", help="复用当前会话历史")
+    parser.add_argument("--resume", action="store_true", help="复用当前会话历史；--workflow 下改为复用已落盘的阶段产物")
     parser.add_argument("--export", action="store_true", help="导出当前会话为 Markdown 后退出")
+    parser.add_argument(
+        "--workflow",
+        action="store_true",
+        help="按 Plan → Collect → Synthesize 三阶段执行，产物写入 workspace/<session>/workflow/",
+    )
     args = parser.parse_args()
 
     if args.export:
@@ -72,6 +122,10 @@ def main():
         except ValueError as exc:
             raise SystemExit(str(exc))
         print("已导出: {}".format(path))
+        return
+
+    if args.workflow:
+        run_workflow_mode(args.prompt, resume=args.resume)
         return
 
     settings = load_settings()
