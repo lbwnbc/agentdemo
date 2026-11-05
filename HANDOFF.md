@@ -27,12 +27,15 @@
 | `80a2318` | 第 5b 步：PDF 精读与证据笔记 |
 | `6aacabc` | 第 6 步：调研 SOP 系统提示词（移除 get_weather） |
 | `50c3d8c` | 第 7 步：会话持久化 + 上下文压缩 |
+| `5026ffa` | 本交接文档初版 |
 
-**注意：`6aacabc` 与 `50c3d8c` 尚未推送到 GitHub**（当时 github.com:443 连接超时），本地 `main` 领先 2 个提交。网络恢复后执行：
+**注意：`6aacabc` / `50c3d8c` / `5026ffa` 以及本文件的后续更新都还没推到 GitHub。** 本机到 github.com:443 的 TLS 握手与连接均失败（详见第八节第 1 条），本地 `main` 领先 `origin/main` 若干提交。网络恢复后执行：
 
 ```powershell
 git push origin main
 ```
+
+推送成功后请顺手把本表补上自己的提交号，免得后面接手的人误判已同步。
 
 ## 四、代码地图
 
@@ -103,7 +106,7 @@ $env:LITAGENT_COMPACT_THRESHOLD=3000
 
 ## 八、已知限制与坑
 
-1. **GitHub 推送不稳定**：多次出现 `Failed to connect to github.com port 443`，与代码/凭据无关。恢复后重试 `git push origin main` 即可。
+1. **GitHub 推送不稳定 / 当前不可用**：多次出现 `Failed to connect to github.com port 443`。2026-11-05 复测：TCP 443 可达（`Test-NetConnection` 为 True），但 `curl https://github.com` 返回 `http=000`、curl 退出码 35（TLS 连接失败），`git push` 无论是否加 `http.version=HTTP/1.1` 都失败。与代码、凭据、sandbox 无关，属于本机网络环境问题。恢复后重试 `git push origin main` 即可。
 2. **arxiv.org/pdf 下载在本网络超时**，`export.arxiv.org` API 正常。因此真实 PDF 下载链路未端到端验证过（解析逻辑本身已用本地构造 PDF 验证）。
 3. **GitHub 仓库是 public**，且早期 API key 曾明文出现在 `main.py` 和对话里，务必去智谱后台轮换。
 4. **缺少提交到仓库的自动化测试**：目前的验证脚本是临时的（写在 `%TEMP%`），删掉即失。第 9 步应把 golden set 与工具测试固化到 `tests/`。
