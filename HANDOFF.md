@@ -30,6 +30,7 @@
 | `5026ffa` | 本交接文档初版 |
 | `f425419` | 交接文档补充推送状态与网络诊断 |
 | `e10b18a` | 第 8 步：研究工作流编排（Plan → Collect → Synthesize） |
+| `2f0dee3` | Web 交互界面：本地 HTTP 服务 + SSE + 单页前端（`main.py --web`） |
 
 **当前已全部推送到 GitHub**（`origin/main` 与本地一致）。旧智谱 key 已在后台禁用并更换，新 key 只存在本地 `.env`（已 gitignore）。
 
