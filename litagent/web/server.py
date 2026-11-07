@@ -291,6 +291,7 @@ class JobManager:
         os.environ["LITAGENT_SESSION"] = job.session
         tool_names = {}
         current_phase = {"name": "plan"}
+        active_phase = {"name": None}
 
         def on_event(event):
             payload = _describe_event(event, tool_names)
@@ -300,6 +301,10 @@ class JobManager:
         def on_phase(name, status, info):
             if status == "start":
                 current_phase["name"] = name
+                active_phase["name"] = name
+            elif status in ("done", "failed", "degraded", "skipped"):
+                if active_phase["name"] == name:
+                    active_phase["name"] = None
             payload = {
                 "kind": "phase",
                 "phase": name,
@@ -339,12 +344,22 @@ class JobManager:
                 "source": "run",
             }
             job.push({"kind": "finished", "ok": True, "stats": job.result["stats"]})
-        except WorkflowError as exc:
-            job.error = str(exc)
-            job.push({"kind": "error", "message": job.error})
-            job.push({"kind": "finished", "ok": False, "error": job.error})
         except Exception as exc:
-            job.error = "{}: {}".format(type(exc).__name__, exc)
+            if isinstance(exc, WorkflowError):
+                job.error = str(exc)
+            else:
+                job.error = "{}: {}".format(type(exc).__name__, exc)
+            # 阶段内部抛异常（如 LLM 网络失败）不会走 validator 的 failed 回调，
+            # 这里补一条 phase failed，避免界面一直停在“进行中”
+            if active_phase["name"]:
+                job.push(
+                    {
+                        "kind": "phase",
+                        "phase": active_phase["name"],
+                        "status": "failed",
+                        "info": {"problems": [job.error]},
+                    }
+                )
             job.push({"kind": "error", "message": job.error})
             job.push({"kind": "finished", "ok": False, "error": job.error})
         finally:

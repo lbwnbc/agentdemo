@@ -929,7 +929,13 @@
       if (payload.ok) {
         loadResult(state.jobId);
       } else {
-        setHint(payload.error || "工作流失败", true);
+        var failure = payload.error || "工作流失败";
+        PHASES.forEach(function (phase) {
+          if (phaseCards[phase.id].dataset.status === "start") {
+            setPhase(phase.id, "failed", { problems: [failure] });
+          }
+        });
+        setHint(failure, true);
         showTab("log");
       }
     } else if (payload.kind === "error") {
@@ -954,7 +960,12 @@
       handleEvent(payload);
     };
     es.onerror = function () {
-      if (!state.running && state.es) { state.es.close(); state.es = null; }
+      if (state.running) {
+        setHint("事件流连接中断，正在尝试重连…", true);
+      } else if (state.es) {
+        state.es.close();
+        state.es = null;
+      }
     };
   }
 
@@ -1171,6 +1182,14 @@
           showTab("log");
           connectEvents(status.job.id, 0);
         } else if (status.job && status.job.done) {
+          Object.keys(status.job.stages).forEach(function (key) {
+            var stageStatus = status.job.stages[key];
+            if (stageStatus === "start") {
+              setPhase(key, "failed", { problems: [status.job.error || "任务已中断"] });
+            } else {
+              setPhase(key, stageStatus, {});
+            }
+          });
           if (status.job.error) {
             setHint(status.job.error, true);
           } else {
