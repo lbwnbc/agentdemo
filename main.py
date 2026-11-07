@@ -15,6 +15,7 @@ from litagent.session import (
 )
 from litagent.tools import build_default_registry
 from litagent.types import AgentEvent
+from litagent.web.server import serve as serve_web
 from litagent.workflow import WorkflowError, run_workflow
 
 SYSTEM_PROMPT = load_system_prompt()
@@ -114,7 +115,13 @@ def main():
         action="store_true",
         help="按 Plan → Collect → Synthesize 三阶段执行，产物写入 workspace/<session>/workflow/",
     )
+    parser.add_argument("--web", action="store_true", help="启动本地 Web 交互界面")
+    parser.add_argument("--port", type=int, default=8000, help="Web 界面端口，默认 8000")
     args = parser.parse_args()
+
+    if args.web:
+        serve_web(port=args.port)
+        return
 
     if args.export:
         try:

@@ -1,6 +1,6 @@
 # 交接文档：文献调研智能体（agentdemo）
 
-> 用途：在上下文切换 / 换人接手时快速恢复项目状态。最后更新于第 8 步完成时。
+> 用途：在上下文切换 / 换人接手时快速恢复项目状态。最后更新于第 8 步完成 + Web 交互界面落地。
 
 ## 一、项目目标
 
@@ -12,7 +12,7 @@
 
 ## 二、当前状态（一句话）
 
-框架层第 1–8 步已完成并真实跑通：检索 arXiv → 精读 PDF → 记录证据笔记 → 带引用综合 → 会话持久化/续聊 → 超阈值上下文压缩 → 三阶段工作流编排。剩余第 9（评测与交互），以及被推迟的 Skills。
+框架层第 1–8 步已完成并真实跑通：检索 arXiv → 精读 PDF → 记录证据笔记 → 带引用综合 → 会话持久化/续聊 → 超阈值上下文压缩 → 三阶段工作流编排。第 9 步的“交互”部分已先落地：本地零依赖 Web 界面（`python main.py --web`）。剩余第 9 步的评测（golden set / 指标 / tests），以及被推迟的 Skills。
 
 ## 三、提交记录
 
@@ -59,6 +59,8 @@ litagent/
   tools/notes.py              save_note / search_notes（notes.jsonl）
   tools/workflow_tools.py     submit_plan / submit_evidence / submit_outline / submit_report
   tools/__init__.py           build_default_registry()（6 个工具）
+  web/server.py               本地 Web 服务：ThreadingHTTPServer 路由 + SSE + 单任务 JobManager（零新增依赖）
+  web/static/index.html       单页前端：主题表单、阶段卡片、实时日志、报告/大纲/证据/计划四视图
 requirements.txt              requests、PyPDF2==3.0.1
 ROADMAP.md                    原始分步计划与 pi 代码参考
 ```
@@ -77,6 +79,7 @@ ROADMAP.md                    原始分步计划与 pi 代码参考
 8. **工作流用“提交工具”而不是解析文本**：`submit_plan` / `submit_evidence` / `submit_outline` / `submit_report` 把结构化产物直接写进 `StageStore`；前三个提交后靠 `ToolResult.terminate` 立即结束阶段。这样不需要从模型自由文本里抠 JSON，也不会因为格式抖动而失败。
 9. **阶段可断点续跑**：产物落盘后 `--workflow --resume` 会跳过 plan/collect/outline。真实跑时 report 阶段连续两次 read timeout，靠这个省掉了重跑 collect 的 23 万 tokens。
 10. **引用校验在图之外**：`validate_citations()` 只认证据库里的 `[eN]`、arXiv 号和 DOI，校验不过会把问题清单回喂给模型重写一次；仍不过就降级，把问题写进 `report.md` 末尾而不是丢掉报告。
+11. **Web 界面零新增依赖**：标准库 `ThreadingHTTPServer` 做路由，SSE 单向下发阶段与工具事件；前端是自包含单页（无构建、无 CDN），报告用极简 Markdown 渲染器，`[eN]` 可点击跳到证据卡。`JobManager` 串行执行并缓存全部事件，页面刷新后从 0 回放。
 
 ## 六、运行方式
 
@@ -99,6 +102,9 @@ python main.py --workflow "LLM agent memory 的研究现状"
 # 6) 阶段失败后接着跑（跳过已落盘的 plan/evidence/outline）
 $env:ZHIPU_TIMEOUT=300   # 报告这类长输出容易撞默认 60s 超时
 python main.py --workflow --resume "同一主题"
+
+# 7) 本地 Web 交互界面（浏览器打开 http://127.0.0.1:8000）
+python main.py --web --port 8000
 ```
 
 可用环境变量：`ZHIPU_API_KEY`、`ZHIPU_BASE_URL`、`ZHIPU_MODEL`、`ZHIPU_TEMPERATURE`、`ZHIPU_TIMEOUT`、`ZHIPU_MAX_RETRIES`、`LITAGENT_COMPACT_THRESHOLD`、`LITAGENT_WORKSPACE`、`LITAGENT_SESSION`。
@@ -113,6 +119,7 @@ python main.py --workflow --resume "同一主题"
 - **第 6 步**：真实跑通 4 轮 / 27896 tokens，输出四段式报告并带 `[n1]` 引用。
 - **第 7 步**：会话往返/导出/空会话报错；真实 `--resume` 1 轮直接复用历史；真实压缩触发 `[compact] messages 10 -> 7`，且模型记得上一轮论文编号并主动去重。
 - **第 8 步**：离线验证阶段提交、产物落盘、非法引用触发 retry 后通过、未提交产物抛 `WorkflowError`、`resume` 只跑失败阶段；真实跑通完整流程——plan 4 子问题、collect 10 轮 7 篇 PDF 产出 12 条证据卡（23.5 万 tokens）、outline 2345 字、report 6423 字；引用校验 12/12 全部被引用、零非法 id/arXiv 号/DOI。产出报告里两处「证据不足」是模型主动标注，不是漏写。
+- **Web 界面**：`python main.py --web` 启动后浏览器实测无控制台报错，空态、历史产物（wf-real 12 条证据）与报告引用芯片渲染正常；用 `resume=true` 只跑 report，SSE 依次收到 plan/collect/outline `skipped`、report `start`、`submit_report` 工具调用、report `done`（14,996 tokens）与 `finished`，共 12 条事件；`/api/result` 返回新报告 5,636 字、引用自检 0 问题。
 
 ## 八、已知限制与坑
 
@@ -126,11 +133,13 @@ python main.py --workflow --resume "同一主题"
 8. **无上下文长度硬校验**：阈值默认 30000 tokens，按模型实际窗口需调（`LITAGENT_COMPACT_THRESHOLD`）。
 9. **工作流没有接入 session/compaction**：四个阶段各自独立统计用量，`--workflow` 不写 `session.jsonl`，也不能 `--export`；另外 `--workflow` 新跑会覆盖上一轮的四个产物文件。
 10. **collect 阶段成本高**：真实跑满 10 轮用了 23.5 万 tokens，因为每轮都携带检索摘要与 PDF 正文。后续可考虑按论文拆子代理、或把已读页压缩成证据再丢弃原文。
+11. **Web 端是单任务串行**：`JobManager` 同时只允许一个工作流，因为 `LITAGENT_SESSION` 是进程级环境变量，并发跑不同会话会互相串目录；页面刷新后靠内存中的 job 回放事件，服务重启则历史任务不可再查（产物仍在磁盘，可切会话读取）。
+12. **Web 端默认放宽读超时**：`serve()` 用 `setdefault("ZHIPU_TIMEOUT", "300")`，避免报告阶段撞 60s；`.env` 显式设置可覆盖。
 
 ## 九、下一步（按建议顺序）
 
 1. **Skills（原第 6 步后半，也是唯一还欠的框架能力）**。`litagent/prompt/skills/*/SKILL.md` + `load_skill` 工具做渐进式披露：主提示词只放索引，按需加载全文。参考 pi 的 `skills.ts`、`resource-loader.ts`。验收：开/关 skills 的产出可对比，引用格式统一。
-2. **第 9 步：评测与交互**。golden set（10 个主题 + 期望覆盖的关键工作）、指标（候选召回 / 引用真实率 / 证据覆盖率 / 工具失败率 / 成本），把 `%TEMP%` 里的验证脚本固化进 `tests/`；先做 rich CLI 渲染事件流，再考虑 Web。可以参考第 8 步的 12 条证据做一个小型回归样例。
+2. **第 9 步：评测（交互部分已完成）**。golden set（10 个主题 + 期望覆盖的关键工作）、指标（候选召回 / 引用真实率 / 证据覆盖率 / 工具失败率 / 成本），把 `%TEMP%` 里的验证脚本固化进 `tests/`；Web 界面已提供阶段进度、实时事件流与产物阅读，可直接复用其事件数据做展示层回归。
 3. **增强检索**：Semantic Scholar 引文滚雪球（注意限速，建议申请 key）、跨会话文献库、去重。
 4. **工作流增强**（可选）：把 `--workflow` 的事件接进 `session.jsonl` 以支持 `--export`；collect 按论文拆子代理降低 23 万 tokens 的上下文成本；多主题运行时不覆盖旧产物。
 
