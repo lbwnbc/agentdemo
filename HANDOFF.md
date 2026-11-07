@@ -1,6 +1,6 @@
 # 交接文档：文献调研智能体（agentdemo）
 
-> 用途：在上下文切换 / 换人接手时快速恢复项目状态。最后更新于第 8 步完成 + Web 交互界面落地。
+> 用途：在上下文切换 / 换人接手时快速恢复项目状态。最后更新于 2026-11-07（第 8 步 + Web 界面 + 失败态与年份约束修复）。
 
 ## 一、项目目标
 
@@ -12,7 +12,9 @@
 
 ## 二、当前状态（一句话）
 
-框架层第 1–8 步已完成并真实跑通：检索 arXiv → 精读 PDF → 记录证据笔记 → 带引用综合 → 会话持久化/续聊 → 超阈值上下文压缩 → 三阶段工作流编排。第 9 步的“交互”部分已先落地：本地零依赖 Web 界面（`python main.py --web`）。剩余第 9 步的评测（golden set / 指标 / tests），以及被推迟的 Skills。
+框架层第 1–8 步已完成并真实跑通：检索 arXiv → 精读 PDF → 记录证据笔记 → 带引用综合 → 会话持久化/续聊 → 超阈值上下文压缩 → 三阶段工作流编排。第 9 步的“交互”部分已先落地：本地零依赖 Web 界面（`python main.py --web`）。近期又修了两个真实问题：任务异常时界面不再停在「进行中」；规划提示词强制沿用主题中的明确年份。剩余第 9 步的评测（golden set / 指标 / tests），以及被推迟的 Skills。
+
+**当前本机运行时状态（2026-11-07）**：8123 端口有一个 Web 实例在跑（`python main.py --web --port 8123`），空闲、无历史 job（服务重启会清空内存里的 job）。工作区里 `wf-real` 是完整四件套（4 子问题 / 12 证据 / 报告），`new` 只有 `plan.json`（collect 因代理不可达在第一次 LLM 调用就失败）。
 
 ## 三、提交记录
 
@@ -31,6 +33,9 @@
 | `f425419` | 交接文档补充推送状态与网络诊断 |
 | `e10b18a` | 第 8 步：研究工作流编排（Plan → Collect → Synthesize） |
 | `2f0dee3` | Web 交互界面：本地 HTTP 服务 + SSE + 单页前端（`main.py --web`） |
+| `8c3ed87` | 交接文档补充 Web 界面提交记录 |
+| `b9ab4e6` | 修复：工作流异常时标记失败阶段，避免界面停在「进行中」 |
+| `c050180` | 修复：规划阶段强制沿用主题中的年份范围 |
 
 **当前已全部推送到 GitHub**（`origin/main` 与本地一致）。旧智谱 key 已在后台禁用并更换，新 key 只存在本地 `.env`（已 gitignore）。
 
@@ -121,6 +126,8 @@ python main.py --web --port 8000
 - **第 7 步**：会话往返/导出/空会话报错；真实 `--resume` 1 轮直接复用历史；真实压缩触发 `[compact] messages 10 -> 7`，且模型记得上一轮论文编号并主动去重。
 - **第 8 步**：离线验证阶段提交、产物落盘、非法引用触发 retry 后通过、未提交产物抛 `WorkflowError`、`resume` 只跑失败阶段；真实跑通完整流程——plan 4 子问题、collect 10 轮 7 篇 PDF 产出 12 条证据卡（23.5 万 tokens）、outline 2345 字、report 6423 字；引用校验 12/12 全部被引用、零非法 id/arXiv 号/DOI。产出报告里两处「证据不足」是模型主动标注，不是漏写。
 - **Web 界面**：`python main.py --web` 启动后浏览器实测无控制台报错，空态、历史产物（wf-real 12 条证据）与报告引用芯片渲染正常；用 `resume=true` 只跑 report，SSE 依次收到 plan/collect/outline `skipped`、report `start`、`submit_report` 工具调用、report `done`（14,996 tokens）与 `finished`，共 12 条事件；`/api/result` 返回新报告 5,636 字、引用自检 0 问题。
+- **失败态修复（2026-11-07）**：用错误 key 起 8124 测试实例，SSE 事件为 `plan start → agent_start → turn → phase plan failed → error → finished(ok=false)`；浏览器实测「规划」卡片标红、提示 401，其余阶段保持等待，控制台零报错。旧行为只会发 `error`/`finished`，卡片永远停在「进行中」。
+- **年份约束修复（2026-11-07）**：真实复现「2026 年智能体记忆机制前沿进展」被规划成 `arXiv 2024–2026`；定位为 `plan.md` 只要求写时间范围、`system.md` 又有「优先近 2-3 年」偏好，模型据此自行放宽。已在 `plan.md` 增加「明确年份必须原样沿用」规则；**尚未复跑真实主题验证**，下次运行 plan 时要检查 `topic_boundary` 是否还与主题年份一致。
 
 ## 八、已知限制与坑
 
@@ -136,6 +143,9 @@ python main.py --web --port 8000
 10. **collect 阶段成本高**：真实跑满 10 轮用了 23.5 万 tokens，因为每轮都携带检索摘要与 PDF 正文。后续可考虑按论文拆子代理、或把已读页压缩成证据再丢弃原文。
 11. **Web 端是单任务串行**：`JobManager` 同时只允许一个工作流，因为 `LITAGENT_SESSION` 是进程级环境变量，并发跑不同会话会互相串目录；页面刷新后靠内存中的 job 回放事件，服务重启则历史任务不可再查（产物仍在磁盘，可切会话读取）。
 12. **Web 端默认放宽读超时**：`serve()` 用 `setdefault("ZHIPU_TIMEOUT", "300")`，避免报告阶段撞 60s；`.env` 显式设置可覆盖。
+13. **代理环境变量会让 LLM 调用瞬间失败**：2026-11-07 某次 Web 实例继承了不可用的代理配置，collect 的第一次 LLM 调用就 `ProxyError`（重试 3 次后 `LLMError`），任务随即结束。同一台机器新开进程 `requests.utils.getproxies()` 为空、直连 `open.bigmodel.cn` 返回 200。处理办法：在干净 shell 重启服务；必要时清理 `HTTP_PROXY` / `HTTPS_PROXY` / `ALL_PROXY`。
+14. **`resume` 会复用旧 `plan.json`**：改了主题或 `plan.md` 之后，必须取消「复用已落盘产物」或删除 `workspace/<session>/workflow/plan.json`，否则规划阶段直接跳过，旧边界会一直沿用。
+15. **界面状态 ≠ 任务存活**：服务重启会丢掉内存里的 job，旧任务的产物仍在磁盘；排查时先看 `GET /api/status` 的 `done/error/stages`，不要只看阶段卡片。
 
 ## 九、下一步（按建议顺序）
 
@@ -150,3 +160,4 @@ python main.py --web --port 8000
 - 改工具就改 `tools/`，别把业务塞进 `loop.py`；loop 只依赖 `client.chat` 和 `registry` 两个接口。
 - 任何“让模型更聪明”的改动，优先改 `prompt/system.md`，而不是加代码分支。
 - 要改工作流，先看 `litagent/workflow.py` 的四个 `_run_stage` 调用点；阶段产物全靠提交工具落盘，别改成解析模型文本。
+- 界面卡住 / 状态可疑时，先 `GET /api/status` 看 `done` 与 `error`，再 `GET /api/events?job=<id>&from=0` 回放事件；服务端 `_stream` 会把缓存事件全量重发，不必重新跑任务。
