@@ -13,6 +13,7 @@ from litagent.session import (
     load_messages,
     reset_session,
 )
+from litagent.run_spec import MODES, LEVELS, resolve
 from litagent.tools import build_default_registry
 from litagent.types import AgentEvent
 from litagent.web.server import serve as serve_web
@@ -80,19 +81,24 @@ def print_phase(name, status, info):
         print("[{}] failed".format(name))
 
 
-def run_workflow_mode(topic, resume=False):
+def run_workflow_mode(topic, resume=False, mode="deep", level="low"):
     settings = load_settings()
     client = OpenAICompatClient(settings)
+    try:
+        spec = resolve(topic, mode=mode, level=level)
+    except ValueError as exc:
+        raise SystemExit(str(exc))
+    print("[spec] {}：{}".format(spec.label, spec.describe()))
     try:
         result = run_workflow(
             client,
             build_default_registry(),
-            topic,
+            spec,
             on_event=print_event,
             on_phase=print_phase,
             resume=resume,
         )
-    except WorkflowError as exc:
+    except (WorkflowError, ValueError) as exc:
         raise SystemExit("工作流失败: {}".format(exc))
 
     print()
@@ -115,6 +121,18 @@ def main():
         action="store_true",
         help="按 Plan → Collect → Synthesize 三阶段执行，产物写入 workspace/<session>/workflow/",
     )
+    parser.add_argument(
+        "--mode",
+        choices=list(MODES),
+        default="deep",
+        help="调研模式：deep 深度调研（默认）/ survey 仅搜集；仅对 --workflow 生效",
+    )
+    parser.add_argument(
+        "--level",
+        choices=list(LEVELS),
+        default="low",
+        help="档位：low / mid / high，决定目标篇数与 Collect 轮数预算；仅对 --workflow 生效",
+    )
     parser.add_argument("--web", action="store_true", help="启动本地 Web 交互界面")
     parser.add_argument("--port", type=int, default=8000, help="Web 界面端口，默认 8000")
     args = parser.parse_args()
@@ -132,7 +150,7 @@ def main():
         return
 
     if args.workflow:
-        run_workflow_mode(args.prompt, resume=args.resume)
+        run_workflow_mode(args.prompt, resume=args.resume, mode=args.mode, level=args.level)
         return
 
     settings = load_settings()

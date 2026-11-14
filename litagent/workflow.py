@@ -17,6 +17,7 @@ from dataclasses import dataclass, field
 
 from litagent.agent import run_loop
 from litagent.prompt import load_workflow_prompt
+from litagent.run_spec import RunSpec, resolve
 from litagent.tools.registry import ToolRegistry
 from litagent.tools.workflow_tools import (
     StageStore,
@@ -28,10 +29,7 @@ from litagent.tools.workflow_tools import (
 from litagent.workspace import session_dir
 
 PLAN_TURNS = 2
-COLLECT_TURNS = 10
 SYNTHESIS_TURNS = 2
-
-MIN_COLLECT_PAPERS = 5
 
 EVIDENCE_REF = re.compile(r"\[e(\d+)\]")
 ARXIV_REF = re.compile(r"arXiv:\s*(\d{4}\.\d{4,5})(?:v\d+)?", re.IGNORECASE)
@@ -45,6 +43,11 @@ class WorkflowError(Exception):
 @dataclass
 class WorkflowResult:
     topic: str
+    mode: str = "deep"
+    level: str = "low"
+    target_min: int = 10
+    target_max: int = 15
+    read_k: int = 8
     plan: dict = None
     evidence: list = field(default_factory=list)
     outline: str = ""
@@ -108,7 +111,7 @@ def _sub_question_covered(card_text, sub_id, question):
     return bool(snippet) and snippet in card_text
 
 
-def _validate_collect(store, plan):
+def _validate_collect(store, plan, target_min):
     """Collect 阶段校验：论文数、子问题覆盖、证据总量都是硬约束。"""
     if not store.evidence:
         return ["还没有调用 submit_evidence"]
@@ -117,10 +120,10 @@ def _validate_collect(store, plan):
     papers = set(
         _normalise_arxiv_id(record["arxiv_id"]) for record in store.evidence
     ) - {""}
-    if len(papers) < MIN_COLLECT_PAPERS:
+    if len(papers) < target_min:
         problems.append(
             "证据库只覆盖 {} 篇论文，要求至少 {} 篇不同论文（按 arXiv 编号去重，"
-            "同一篇的多条证据只算一篇）".format(len(papers), MIN_COLLECT_PAPERS)
+            "同一篇的多条证据只算一篇）".format(len(papers), target_min)
         )
 
     sub_questions = (plan or {}).get("sub_questions") or []
@@ -158,6 +161,21 @@ def _merge_usage(total, usage):
 def _phase(on_phase, name, status, **info):
     if on_phase is not None:
         on_phase(name, status, info)
+
+
+def _phase_with_meta(on_phase, spec):
+    """给每个阶段事件附上档位信息，日志与 Web 都据此展示本轮参数。"""
+    if on_phase is None:
+        return None
+
+    def wrapper(name, status, info):
+        payload = dict(info or {})
+        payload.setdefault("mode", spec.mode)
+        payload.setdefault("level", spec.level)
+        payload.setdefault("target_min", spec.target_min)
+        on_phase(name, status, payload)
+
+    return wrapper
 
 
 def _clone_registry(source):
@@ -320,18 +338,29 @@ def _run_report_stage(
     return steps_total, usage_total, issues
 
 
-def run_workflow(client, registry, topic, on_event=None, on_phase=None, resume=False):
+def run_workflow(client, registry, spec, on_event=None, on_phase=None, resume=False):
     """执行一次完整的三阶段调研，产物写入 workspace/<session>/workflow/。
 
+    spec 传 RunSpec，或直接传主题字符串（等价于 deep/low）。
     resume=True 时读取已落盘的 plan.json / evidence.jsonl / outline.md，
     跳过对应阶段，用于阶段失败后接着跑而不重烧 token。
     """
-    topic = " ".join(str(topic or "").split())
-    if not topic:
-        raise ValueError("研究主题不能为空")
+    if not isinstance(spec, RunSpec):
+        spec = resolve(spec)
+    if spec.mode == "survey":
+        raise ValueError("survey 模式尚未实现（第 11 步）")
+    on_phase = _phase_with_meta(on_phase, spec)
 
+    topic = spec.topic
     store = StageStore()
-    result = WorkflowResult(topic=topic)
+    result = WorkflowResult(
+        topic=topic,
+        mode=spec.mode,
+        level=spec.level,
+        target_min=spec.target_min,
+        target_max=spec.target_max,
+        read_k=spec.read_k,
+    )
     target = workflow_dir()
     if not resume:
         for filename in ("plan.json", "evidence.jsonl", "outline.md", "report.md"):
@@ -377,8 +406,9 @@ def run_workflow(client, registry, topic, on_event=None, on_phase=None, resume=F
         collect_registry = _clone_registry(registry)
         collect_registry.register(build_evidence_tool(store))
         _phase(on_phase, "collect", "start")
-        collect_prompt = "{}\n\n当前计划：\n{}".format(
+        collect_prompt = "{}\n\n本轮目标：{}\n\n当前计划：\n{}".format(
             load_workflow_prompt("collect"),
+            spec.describe(),
             json.dumps(store.plan, ensure_ascii=False, indent=2),
         )
         steps, usage = _run_stage(
@@ -387,8 +417,8 @@ def run_workflow(client, registry, topic, on_event=None, on_phase=None, resume=F
             "collect",
             collect_prompt,
             "请按计划开始检索与精读，把证据写进证据库。",
-            lambda: _validate_collect(store, store.plan),
-            COLLECT_TURNS,
+            lambda: _validate_collect(store, store.plan, spec.target_min),
+            spec.max_turns,
             on_event,
             on_phase,
         )

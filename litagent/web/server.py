@@ -22,6 +22,7 @@ from urllib.parse import parse_qs, urlparse
 
 from litagent.config import PROJECT_ROOT, _load_dotenv, load_settings
 from litagent.llm.openai_compat import OpenAICompatClient
+from litagent.run_spec import resolve
 from litagent.tools import build_default_registry
 from litagent.types import AgentEvent
 from litagent.workflow import WorkflowError, run_workflow
@@ -214,11 +215,12 @@ def _describe_event(event, tool_names):
 class Job:
     """一次工作流执行：缓存全部事件，供迟到的浏览器从 0 回放。"""
 
-    def __init__(self, topic, session, resume):
+    def __init__(self, topic, session, resume, spec):
         self.id = uuid.uuid4().hex[:10]
         self.topic = topic
         self.session = session
         self.resume = resume
+        self.spec = spec
         self.events = []
         self.stages = {name: "pending" for name in PHASES}
         self.result = None
@@ -253,6 +255,9 @@ class Job:
             "topic": self.topic,
             "session": self.session,
             "resume": self.resume,
+            "mode": self.spec.mode,
+            "level": self.spec.level,
+            "target_min": self.spec.target_min,
             "stages": dict(self.stages),
             "done": self.done,
             "error": self.error,
@@ -275,11 +280,11 @@ class JobManager:
     def current(self):
         return self._current
 
-    def start(self, topic, session, resume):
+    def start(self, topic, session, resume, spec):
         with self._lock:
             if self._current is not None and not self._current.done:
                 raise RuntimeError("已有调研任务在运行，请等待完成")
-            job = Job(topic, session, resume)
+            job = Job(topic, session, resume, spec)
             self._jobs[job.id] = job
             self._current = job
             thread = threading.Thread(target=self._run, args=(job,), daemon=True)
@@ -319,7 +324,7 @@ class JobManager:
             result = run_workflow(
                 client,
                 build_default_registry(),
-                job.topic,
+                job.spec,
                 on_event=on_event,
                 on_phase=on_phase,
                 resume=job.resume,
@@ -327,6 +332,11 @@ class JobManager:
             job.result = {
                 "topic": result.topic,
                 "session": job.session,
+                "mode": result.mode,
+                "level": result.level,
+                "target_min": result.target_min,
+                "target_max": result.target_max,
+                "read_k": result.read_k,
                 "plan": result.plan,
                 "evidence": result.evidence,
                 "outline": result.outline,
@@ -429,11 +439,29 @@ class Handler(BaseHTTPRequestHandler):
         session = safe_session(payload.get("session"))
         resume = bool(payload.get("resume"))
         try:
-            job = self.manager.start(topic, session, resume)
+            spec = resolve(
+                topic,
+                mode=payload.get("mode") or "deep",
+                level=payload.get("level") or "low",
+            )
+        except ValueError as exc:
+            return self._send_json({"ok": False, "error": str(exc)}, 400)
+        try:
+            job = self.manager.start(topic, session, resume, spec)
         except RuntimeError as exc:
             return self._send_json({"ok": False, "error": str(exc)}, 409)
         return self._send_json(
-            {"ok": True, "job": {"id": job.id, "session": session, "resume": resume}}
+            {
+                "ok": True,
+                "job": {
+                    "id": job.id,
+                    "session": session,
+                    "resume": resume,
+                    "mode": job.spec.mode,
+                    "level": job.spec.level,
+                    "target_min": job.spec.target_min,
+                },
+            }
         )
 
     # ---- 各接口实现 ----
