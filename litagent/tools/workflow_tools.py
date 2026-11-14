@@ -91,6 +91,8 @@ def _normalise_evidence(store, arguments):
         "section": _clean(arguments.get("section")),
         "sub_question": _clean(arguments.get("sub_question")),
         "kind": _clean(arguments.get("kind")) or "other",
+        "source": _clean(arguments.get("source")) or "fulltext",
+        "read_round": int(arguments.get("read_round") or 0),
     }
     store.evidence.append(record)
     return {"status": "ok", "id": record["id"], "total": len(store.evidence)}
@@ -142,7 +144,9 @@ def build_plan_tool(store):
     )
 
 
-def build_evidence_tool(store):
+def build_evidence_tool(store, locked_id=None, source=None, read_round=None):
+    """locked_id / source / read_round 由精读调度注入，覆盖模型给的对应字段。"""
+
     def handler(
         arxiv_id,
         claim,
@@ -152,11 +156,12 @@ def build_evidence_tool(store):
         title="",
         doi="",
         kind="other",
+        **_ignored
     ):
         return _normalise_evidence(
             store,
             {
-                "arxiv_id": arxiv_id,
+                "arxiv_id": locked_id or arxiv_id,
                 "claim": claim,
                 "quote": quote,
                 "section": section,
@@ -164,6 +169,8 @@ def build_evidence_tool(store):
                 "title": title,
                 "doi": doi,
                 "kind": kind,
+                "source": (source() if callable(source) else source) or "fulltext",
+                "read_round": read_round or 0,
             },
         )
 

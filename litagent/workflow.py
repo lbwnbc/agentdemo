@@ -18,10 +18,11 @@ from dataclasses import dataclass, field
 from litagent.agent import run_loop
 from litagent.prompt import load_workflow_prompt
 from litagent.run_spec import RunSpec, resolve
+from litagent.search_ladder import normalise_id, plan_queries, run_ladder
+from litagent.select import select_top_k
 from litagent.tools.registry import ToolRegistry
 from litagent.tools.workflow_tools import (
     StageStore,
-    build_evidence_tool,
     build_outline_tool,
     build_plan_tool,
     build_report_tool,
@@ -70,18 +71,27 @@ def _normalise_arxiv_id(value):
 
 
 def validate_citations(report, evidence):
-    """检查报告里的证据 id、arXiv 号、DOI 是否都能回溯到证据库。"""
+    """检查报告里的证据 id、arXiv 号、DOI 是否都能回溯到可引用的证据库。
+
+    只有全文级证据（source=fulltext，缺省视为 fulltext）可被引用；
+    摘要级证据只作背景，不允许出现在报告引用里。
+    """
     issues = []
-    known_ids = set(record["id"] for record in evidence)
+    citable = [
+        record
+        for record in evidence
+        if str(record.get("source") or "fulltext") == "fulltext"
+    ]
+    known_ids = set(record["id"] for record in citable)
 
     used_ids = ["e{}".format(raw) for raw in EVIDENCE_REF.findall(report)]
     for evidence_id in used_ids:
         if evidence_id not in known_ids:
             issues.append("引用了不存在的证据 id [{}]".format(evidence_id))
-    if evidence and not used_ids:
+    if citable and not used_ids:
         issues.append("报告没有任何 [eN] 证据引用，无法回溯")
 
-    known_arxiv = set(_normalise_arxiv_id(record["arxiv_id"]) for record in evidence)
+    known_arxiv = set(_normalise_arxiv_id(record["arxiv_id"]) for record in citable)
     for found in ARXIV_REF.findall(report):
         if _normalise_arxiv_id(found) not in known_arxiv:
             issues.append(
@@ -90,7 +100,7 @@ def validate_citations(report, evidence):
 
     known_dois = set(
         record.get("doi", "").rstrip(".").lower()
-        for record in evidence
+        for record in citable
         if record.get("doi")
     )
     for found in DOI_REF.findall(report):
@@ -112,15 +122,25 @@ def _sub_question_covered(card_text, sub_id, question):
     return bool(snippet) and snippet in card_text
 
 
-def _validate_collect(store, plan, target_min):
-    """Collect 阶段校验：论文数、子问题覆盖、证据总量都是硬约束。"""
+def _validate_collect(store, plan, target_min, papers=None):
+    """Collect 阶段校验：论文数、子问题覆盖、证据总量都是硬约束。
+
+    papers 传可计入的 arXiv 号集合（精读后只统计全文级证据）；缺省统计全部。
+    """
     if not store.evidence:
         return ["还没有调用 submit_evidence"]
 
     problems = []
-    papers = set(
-        _normalise_arxiv_id(record["arxiv_id"]) for record in store.evidence
-    ) - {""}
+    if papers is None:
+        records = list(store.evidence)
+        papers = set(normalise_id(record["arxiv_id"]) for record in records) - {""}
+    else:
+        papers = set(papers)
+        records = [
+            record
+            for record in store.evidence
+            if normalise_id(record["arxiv_id"]) in papers
+        ]
     if len(papers) < target_min:
         problems.append(
             "证据库只覆盖 {} 篇论文，要求至少 {} 篇不同论文（按 arXiv 编号去重，"
@@ -129,7 +149,7 @@ def _validate_collect(store, plan, target_min):
 
     sub_questions = (plan or {}).get("sub_questions") or []
     if sub_questions:
-        cards = [record.get("sub_question") for record in store.evidence]
+        cards = [record.get("sub_question") for record in records]
         uncovered = []
         for sub in sub_questions:
             sub_id = sub.get("id")
@@ -144,10 +164,10 @@ def _validate_collect(store, plan, target_min):
             )
 
         floor = 2 * len(sub_questions)
-        if len(store.evidence) < floor:
+        if len(records) < floor:
             problems.append(
                 "证据卡共 {} 条，要求至少 {} 条（每个子问题约 2 条起步，目标 10-16 条）".format(
-                    len(store.evidence), floor
+                    len(records), floor
                 )
             )
     return problems
@@ -179,16 +199,20 @@ def _phase_with_meta(on_phase, spec):
     return wrapper
 
 
-def _clone_registry(source):
-    """复制工具定义，避免给调用方的注册表塞进阶段专用工具。"""
-    registry = ToolRegistry()
-    for tool in source.iter_tools():
-        registry.register(tool)
-    return registry
+def _evidence_text(evidence, fulltext_only=False):
+    records = evidence
+    if fulltext_only:
+        records = [
+            record
+            for record in evidence
+            if str(record.get("source") or "fulltext") == "fulltext"
+        ]
+    return "\n".join(json.dumps(record, ensure_ascii=False) for record in records)
 
 
-def _evidence_text(evidence):
-    return "\n".join(json.dumps(record, ensure_ascii=False) for record in evidence)
+def _write_jsonl(path, records):
+    lines = [json.dumps(record, ensure_ascii=False) for record in records]
+    path.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
 
 
 def _read_json(path, default):
@@ -366,7 +390,14 @@ def run_workflow(client, registry, spec, on_event=None, on_phase=None, resume=Fa
     )
     target = workflow_dir()
     if not resume:
-        for filename in ("plan.json", "evidence.jsonl", "outline.md", "report.md"):
+        for filename in (
+            "plan.json",
+            "candidates.jsonl",
+            "selected.json",
+            "evidence.jsonl",
+            "outline.md",
+            "report.md",
+        ):
             stale = target / filename
             if stale.exists():
                 stale.unlink()
@@ -401,35 +432,88 @@ def run_workflow(client, registry, spec, on_event=None, on_phase=None, resume=Fa
         )
     result.plan = store.plan
 
-    # 2) Collect
+    # 2) Collect（deep：候选集 → Select Top-K → 逐篇精读）
+    candidates_path = target / "candidates.jsonl"
+    selected_path = target / "selected.json"
     if store.evidence:
         _phase(on_phase, "collect", "skipped", count=len(store.evidence))
         result.stages.append({"name": "collect", "steps": 0, "usage": {}})
     else:
-        collect_registry = _clone_registry(registry)
-        collect_registry.register(build_evidence_tool(store))
-        _phase(on_phase, "collect", "start")
-        collect_prompt = "{}\n\n本轮目标：{}\n\n当前计划：\n{}".format(
-            load_workflow_prompt("collect"),
-            spec.describe(),
-            json.dumps(store.plan, ensure_ascii=False, indent=2),
+        from litagent.deep_read import read_papers
+
+        _phase(on_phase, "collect", "start", read_k=spec.read_k)
+        candidates = _read_jsonl(candidates_path) if resume else []
+        if candidates:
+            provenance = {"status": "resumed", "count": len(candidates)}
+        else:
+            candidates, provenance = run_ladder(
+                plan_queries(store.plan), spec.target_min, spec.target_max
+            )
+            _write_jsonl(candidates_path, candidates)
+
+        selected = _read_json(selected_path, []) if resume else []
+        if not selected:
+            selected = select_top_k(candidates, store.plan, spec.read_k)
+            selected_path.write_text(
+                json.dumps(selected, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
+        if not selected:
+            _phase(
+                on_phase,
+                "collect",
+                "failed",
+                problems=["候选集为空，没有可精读的论文"],
+            )
+            raise WorkflowError("候选集为空，没有可精读的论文；请检查检索式或网络")
+
+        outcome = read_papers(
+            client, registry, selected, store.plan, store, on_event, on_phase
         )
-        steps, usage = _run_stage(
-            client,
-            collect_registry,
-            "collect",
-            collect_prompt,
-            "请按计划开始检索与精读，把证据写进证据库。",
-            lambda: _validate_collect(store, store.plan, spec.target_min),
-            spec.max_turns,
-            on_event,
+        result.stages.append(
+            {
+                "name": "collect",
+                "steps": outcome["steps"],
+                "usage": outcome["usage"],
+                "candidates": provenance.get("count"),
+                "selected": [paper["arxiv_id"] for paper in selected],
+                "failed": outcome["failed"],
+            }
+        )
+        _merge_usage(result.usage, outcome["usage"])
+
+        fulltext_ids = {
+            normalise_id(record["arxiv_id"])
+            for record in store.evidence
+            if record.get("source", "fulltext") == "fulltext"
+        }
+        # 精读失败的论文直接判失败；只读到摘要的论文记 degraded，
+        # 但可引用（全文）篇数必须过半，否则报告没有可引用的证据。
+        required_fulltext = max(1, (len(selected) + 1) // 2)
+        problems = _validate_collect(
+            store, store.plan, required_fulltext, papers=fulltext_ids
+        )
+        for arxiv_id in outcome["failed"]:
+            problems.append("精读没有产出任何证据：{}".format(arxiv_id))
+        if problems:
+            _phase(on_phase, "collect", "failed", problems=problems)
+            raise WorkflowError(
+                "精读完成度不足：{}".format("；".join(problems))
+            )
+
+        degraded = bool(outcome["failed"] or outcome["abstract"])
+        _phase(
             on_phase,
+            "collect",
+            "degraded" if degraded else "done",
+            count=len(fulltext_ids),
+            candidates=provenance.get("count"),
+            selected=len(selected),
+            failed=outcome["failed"],
+            abstract=outcome["abstract"],
+            steps=outcome["steps"],
+            usage=outcome["usage"],
         )
-        result.stages.append({"name": "collect", "steps": steps, "usage": usage})
-        _merge_usage(result.usage, usage)
-        (target / "evidence.jsonl").write_text(
-            _evidence_text(store.evidence) + "\n", encoding="utf-8"
-        )
+        _write_jsonl(target / "evidence.jsonl", store.evidence)
     result.evidence = list(store.evidence)
 
     # 3) Synthesize：大纲
@@ -440,10 +524,10 @@ def run_workflow(client, registry, spec, on_event=None, on_phase=None, resume=Fa
         outline_registry = ToolRegistry()
         outline_registry.register(build_outline_tool(store))
         _phase(on_phase, "outline", "start")
-        outline_prompt = "{}\n\n计划：\n{}\n\n证据库：\n{}".format(
+        outline_prompt = "{}\n\n计划：\n{}\n\n证据库（仅全文级）：\n{}".format(
             load_workflow_prompt("outline"),
             json.dumps(store.plan, ensure_ascii=False, indent=2),
-            _evidence_text(store.evidence),
+            _evidence_text(store.evidence, fulltext_only=True),
         )
         steps, usage = _run_stage(
             client,
@@ -465,11 +549,11 @@ def run_workflow(client, registry, spec, on_event=None, on_phase=None, resume=Fa
     report_registry = ToolRegistry()
     report_registry.register(build_report_tool(store))
     _phase(on_phase, "report", "start")
-    report_prompt = "{}\n\n计划：\n{}\n\n大纲：\n{}\n\n证据库：\n{}".format(
+    report_prompt = "{}\n\n计划：\n{}\n\n大纲：\n{}\n\n证据库（仅全文级）：\n{}".format(
         load_workflow_prompt("report"),
         json.dumps(store.plan, ensure_ascii=False, indent=2),
         store.outline,
-        _evidence_text(store.evidence),
+        _evidence_text(store.evidence, fulltext_only=True),
     )
     steps, usage, issues = _run_report_stage(
         client,

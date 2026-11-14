@@ -10,7 +10,7 @@ import json
 from datetime import datetime
 
 from litagent.prompt import load_workflow_prompt
-from litagent.search_ladder import run_ladder
+from litagent.search_ladder import plan_queries, run_ladder
 from litagent.tools.registry import ToolRegistry
 from litagent.tools.workflow_tools import StageStore, build_plan_tool
 from litagent.workspace import session_dir
@@ -49,16 +49,6 @@ def _validate_survey_plan(store):
     if not queries:
         return ["子问题里没有任何检索式，仅搜集模式无法开始检索"]
     return []
-
-
-def plan_queries(plan):
-    queries = []
-    for item in (plan or {}).get("sub_questions") or []:
-        for query in item.get("queries") or []:
-            query = " ".join(str(query).split())
-            if query and query.lower() not in {existing.lower() for existing in queries}:
-                queries.append(query)
-    return queries
 
 
 def read_index(root):

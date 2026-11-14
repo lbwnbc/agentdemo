@@ -140,6 +140,20 @@ def digest(papers, abstract_limit=1200):
     return papers
 
 
+def plan_queries(plan):
+    """把计划里的检索式按出现顺序去重。"""
+    queries = []
+    seen = set()
+    for item in (plan or {}).get("sub_questions") or []:
+        for query in item.get("queries") or []:
+            query = " ".join(str(query).split())
+            key = query.lower()
+            if query and key not in seen:
+                seen.add(key)
+                queries.append(query)
+    return queries
+
+
 def run_ladder(queries, target_min, target_max, search=None):
     """逐级检索直到达到上限或走完 L3，返回 (papers, provenance)。"""
     search = search or search_arxiv

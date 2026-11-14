@@ -65,8 +65,29 @@ def record_event(event):
 
 
 def print_phase(name, status, info):
-    if status == "start":
+    if status == "start" and info.get("reading"):
+        item = info["reading"]
+        print(
+            "[collect] 精读 {}/{}：{} {}".format(
+                item.get("index"),
+                item.get("total"),
+                item.get("arxiv_id"),
+                item.get("title") or "",
+            )
+        )
+    elif status == "start":
         print("[{}] start".format(name))
+    elif status == "done" and "candidates" in info:
+        print(
+            "[{}] done: {} 篇全文 / 选中 {} 篇（候选 {} 篇，摘要级 {} 篇，失败 {} 篇）".format(
+                name,
+                info.get("count", 0),
+                info.get("selected", 0),
+                info.get("candidates") or "-",
+                len(info.get("abstract") or []),
+                len(info.get("failed") or []),
+            )
+        )
     elif status == "done" and "count" in info:
         print(
             "[{}] done: {} 篇（最宽级别 {}）".format(
@@ -79,6 +100,17 @@ def print_phase(name, status, info):
                 name,
                 info.get("steps", 0),
                 (info.get("usage") or {}).get("total_tokens", 0),
+            )
+        )
+    elif status == "degraded" and "candidates" in info:
+        print(
+            "[{}] degraded: {} 篇全文 / 选中 {} 篇（候选 {} 篇，摘要级 {} 篇，失败 {} 篇）".format(
+                name,
+                info.get("count", 0),
+                info.get("selected", 0),
+                info.get("candidates") or "-",
+                len(info.get("abstract") or []),
+                len(info.get("failed") or []),
             )
         )
     elif status in ("retry", "degraded"):
