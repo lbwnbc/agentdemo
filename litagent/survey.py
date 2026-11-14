@@ -10,7 +10,7 @@ import json
 from datetime import datetime
 
 from litagent.prompt import load_workflow_prompt
-from litagent.search_ladder import plan_queries, run_ladder
+from litagent.search_ladder import digest, normalise_id, plan_queries, run_ladder
 from litagent.tools.registry import ToolRegistry
 from litagent.tools.workflow_tools import StageStore, build_plan_tool
 from litagent.workspace import session_dir
@@ -78,6 +78,106 @@ def write_index(root, entry):
     (root / "index.json").write_text(
         json.dumps(index, ensure_ascii=False, indent=2), encoding="utf-8"
     )
+
+
+def _read_papers(path):
+    papers = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            paper = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(paper, dict) and normalise_id(paper.get("arxiv_id")):
+            papers.append(paper)
+    return papers
+
+
+def load_survey_papers(survey_ids, target_min=None, root=None):
+    """读取 1–3 份清单的并集（第 13 步），按 arXiv ID 去重。
+
+    返回 (papers, provenance)；provenance 的 status 为 imported，
+    并集篇数低于 target_min 时改为 partial 且带 shortfall——按设计不补检。
+    """
+    root = root or surveys_dir()
+    index = read_index(root)
+    known = {
+        item.get("survey_id"): item
+        for item in index["surveys"]
+        if item.get("survey_id")
+    }
+
+    ids = []
+    for raw in survey_ids or []:
+        survey_id = str(raw).strip()
+        if survey_id and survey_id not in ids:
+            ids.append(survey_id)
+    if not ids:
+        raise ValueError("没有指定要导入的清单")
+    if len(ids) > 3:
+        raise ValueError("一次最多导入 3 份清单，当前给了 {} 份".format(len(ids)))
+
+    merged = {}
+    order = []
+    sources = []
+    for survey_id in ids:
+        entry = known.get(survey_id)
+        if entry is None:
+            raise ValueError(
+                "清单 {} 不存在，请检查 {}".format(survey_id, root / "index.json")
+            )
+        if entry.get("status") not in ("done", "partial"):
+            raise ValueError(
+                "清单 {} 状态为 {}，无法导入".format(survey_id, entry.get("status"))
+            )
+        path = root / survey_id / "papers.jsonl"
+        if not path.exists():
+            raise ValueError("清单 {} 缺少 papers.jsonl".format(survey_id))
+        papers = _read_papers(path)
+        sources.append(
+            {
+                "survey_id": survey_id,
+                "topic": entry.get("topic"),
+                "status": entry.get("status"),
+                "count": len(papers),
+            }
+        )
+        for paper in papers:
+            key = normalise_id(paper.get("arxiv_id"))
+            record = merged.get(key)
+            if record is None:
+                record = dict(paper)
+                record["arxiv_id"] = key
+                record["matched_queries"] = list(paper.get("matched_queries") or [])
+                record["from_surveys"] = [survey_id]
+                merged[key] = record
+                order.append(key)
+            else:
+                for query in paper.get("matched_queries") or []:
+                    if query not in record["matched_queries"]:
+                        record["matched_queries"].append(query)
+                if survey_id not in record["from_surveys"]:
+                    record["from_surveys"].append(survey_id)
+
+    papers = digest([merged[key] for key in order])
+    provenance = {
+        "status": "imported",
+        "source": "survey",
+        "count": len(papers),
+        "shortfall": 0,
+        "max_level": None,
+        "queries": [],
+        "levels": [],
+        "errors": [],
+        "survey_ids": ids,
+        "sources": sources,
+    }
+    if target_min and len(papers) < target_min:
+        provenance["status"] = "partial"
+        provenance["shortfall"] = int(target_min) - len(papers)
+    return papers, provenance
 
 
 def run_survey(client, registry, spec, on_event=None, on_phase=None):

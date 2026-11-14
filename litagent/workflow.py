@@ -58,6 +58,7 @@ class WorkflowResult:
     paths: dict = field(default_factory=dict)
     stages: list = field(default_factory=list)
     survey: dict = None
+    partial: dict = None
 
 
 def workflow_dir():
@@ -247,6 +248,29 @@ def _read_text(path):
     return path.read_text(encoding="utf-8").strip()
 
 
+def _candidate_source(spec, provenance=None):
+    """候选池来源（第 13 步）：写进 plan.json，便于审计本轮是检索还是导入清单。"""
+    if spec.survey_ids:
+        data = {"type": "survey", "survey_ids": list(spec.survey_ids)}
+        if provenance:
+            data["count"] = provenance.get("count")
+            data["status"] = provenance.get("status")
+            data["sources"] = provenance.get("sources") or []
+        return data
+    data = {"type": "search"}
+    if provenance:
+        data["count"] = provenance.get("count")
+        data["status"] = provenance.get("status")
+        data["max_level"] = provenance.get("max_level")
+    return data
+
+
+def _write_plan(target, plan):
+    (target / "plan.json").write_text(
+        json.dumps(plan, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+
+
 def _retry_message(name, problems):
     lines = ["你还没有完成 {} 阶段，原因：".format(name)]
     lines.extend("- {}".format(problem) for problem in problems)
@@ -378,6 +402,13 @@ def run_workflow(client, registry, spec, on_event=None, on_phase=None, resume=Fa
         return run_survey(client, registry, spec, on_event=on_event, on_phase=on_phase)
     on_phase = _phase_with_meta(on_phase, spec)
 
+    # 清单导入（第 13 步）：候选池在 Plan 之前就确定，清单无效时立即失败。
+    imported = None
+    if spec.survey_ids:
+        from litagent.survey import load_survey_papers
+
+        imported = load_survey_papers(spec.survey_ids, spec.target_min)
+
     topic = spec.topic
     store = StageStore()
     result = WorkflowResult(
@@ -427,10 +458,10 @@ def run_workflow(client, registry, spec, on_event=None, on_phase=None, resume=Fa
         )
         result.stages.append({"name": "plan", "steps": steps, "usage": usage})
         _merge_usage(result.usage, usage)
-        (target / "plan.json").write_text(
-            json.dumps(store.plan, ensure_ascii=False, indent=2), encoding="utf-8"
-        )
     result.plan = store.plan
+    if isinstance(store.plan, dict):
+        store.plan["candidate_source"] = _candidate_source(spec)
+        _write_plan(target, store.plan)
 
     # 2) Collect（deep：候选集 → Select Top-K → 逐篇精读）
     candidates_path = target / "candidates.jsonl"
@@ -442,14 +473,29 @@ def run_workflow(client, registry, spec, on_event=None, on_phase=None, resume=Fa
         from litagent.deep_read import read_papers
 
         _phase(on_phase, "collect", "start", read_k=spec.read_k)
-        candidates = _read_jsonl(candidates_path) if resume else []
-        if candidates:
-            provenance = {"status": "resumed", "count": len(candidates)}
-        else:
-            candidates, provenance = run_ladder(
-                plan_queries(store.plan), spec.target_min, spec.target_max
-            )
+        if imported is not None:
+            # 导入模式：候选池严格等于清单并集，不检索、不补检。
+            candidates, provenance = imported
             _write_jsonl(candidates_path, candidates)
+        else:
+            candidates = _read_jsonl(candidates_path) if resume else []
+            if candidates:
+                provenance = {"status": "resumed", "count": len(candidates)}
+            else:
+                candidates, provenance = run_ladder(
+                    plan_queries(store.plan), spec.target_min, spec.target_max
+                )
+                _write_jsonl(candidates_path, candidates)
+        if provenance.get("status") == "partial":
+            result.partial = {
+                "candidate_count": provenance["count"],
+                "target_min": spec.target_min,
+                "shortfall": provenance["shortfall"],
+                "survey_ids": list(spec.survey_ids),
+            }
+        if isinstance(store.plan, dict):
+            store.plan["candidate_source"] = _candidate_source(spec, provenance)
+            _write_plan(target, store.plan)
 
         selected = _read_json(selected_path, []) if resume else []
         if not selected:
@@ -500,7 +546,7 @@ def run_workflow(client, registry, spec, on_event=None, on_phase=None, resume=Fa
                 "精读完成度不足：{}".format("；".join(problems))
             )
 
-        degraded = bool(outcome["failed"] or outcome["abstract"])
+        degraded = bool(outcome["failed"] or outcome["abstract"] or result.partial)
         _phase(
             on_phase,
             "collect",
@@ -510,6 +556,7 @@ def run_workflow(client, registry, spec, on_event=None, on_phase=None, resume=Fa
             selected=len(selected),
             failed=outcome["failed"],
             abstract=outcome["abstract"],
+            partial=result.partial,
             steps=outcome["steps"],
             usage=outcome["usage"],
         )
@@ -570,6 +617,17 @@ def run_workflow(client, registry, spec, on_event=None, on_phase=None, resume=Fa
         result.report = "{}\n\n## 自检未通过\n\n{}\n".format(
             result.report,
             "\n".join("- {}".format(issue) for issue in issues),
+        )
+    if result.partial:
+        result.report = "{}\n\n## 候选池未达档位下限\n\n{}\n".format(
+            result.report,
+            "本轮候选池来自 {} 份清单，共 {} 篇，低于档位下限 {} 篇（差 {} 篇）；"
+            "按清单导入约定不做补充检索。".format(
+                len(result.partial["survey_ids"]),
+                result.partial["candidate_count"],
+                result.partial["target_min"],
+                result.partial["shortfall"],
+            ),
         )
     (target / "report.md").write_text(result.report, encoding="utf-8")
     result.stages.append({"name": "report", "steps": steps, "usage": usage})

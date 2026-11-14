@@ -121,14 +121,16 @@ def print_phase(name, status, info):
         print("[{}] failed".format(name))
 
 
-def run_workflow_mode(topic, resume=False, mode="deep", level="low"):
+def run_workflow_mode(topic, resume=False, mode="deep", level="low", survey_ids=None):
     settings = load_settings()
     client = OpenAICompatClient(settings)
     try:
-        spec = resolve(topic, mode=mode, level=level)
+        spec = resolve(topic, mode=mode, level=level, survey_ids=survey_ids)
     except ValueError as exc:
         raise SystemExit(str(exc))
     print("[spec] {}：{}".format(spec.label, spec.describe()))
+    if spec.survey_ids:
+        print("[spec] 候选池来自清单：{}".format("、".join(spec.survey_ids)))
     try:
         result = run_workflow(
             client,
@@ -147,6 +149,15 @@ def run_workflow_mode(topic, resume=False, mode="deep", level="low"):
     else:
         print(result.report)
     print()
+    if result.partial:
+        print(
+            "注意：候选池只 {} 篇，低于档位下限 {} 篇（差 {} 篇）；"
+            "清单导入不补检，已标记 partial".format(
+                result.partial["candidate_count"],
+                result.partial["target_min"],
+                result.partial["shortfall"],
+            )
+        )
     for name, path in result.paths.items():
         print("{}: {}".format(name, path))
     print("总 tokens: {}".format(result.usage.get("total_tokens", 0)))
@@ -211,6 +222,12 @@ def main():
         default="low",
         help="档位：low / mid / high，决定目标篇数与 Collect 轮数预算；仅对 --workflow 生效",
     )
+    parser.add_argument(
+        "--from-survey",
+        nargs="+",
+        metavar="SURVEY_ID",
+        help="导入 1-3 份仅搜集清单作为候选池（不检索、不补检），仅用于 --workflow deep",
+    )
     parser.add_argument("--web", action="store_true", help="启动本地 Web 交互界面")
     parser.add_argument("--port", type=int, default=8000, help="Web 界面端口，默认 8000")
     args = parser.parse_args()
@@ -228,8 +245,23 @@ def main():
         return
 
     if args.workflow:
-        run_workflow_mode(args.prompt, resume=args.resume, mode=args.mode, level=args.level)
+        for survey_id in args.from_survey or []:
+            if not survey_id.startswith("sv_"):
+                raise SystemExit(
+                    "无法识别清单 id：{}。--from-survey 会把后面的参数都当成清单 id，"
+                    "请把研究主题放在命令最前面".format(survey_id)
+                )
+        run_workflow_mode(
+            args.prompt,
+            resume=args.resume,
+            mode=args.mode,
+            level=args.level,
+            survey_ids=args.from_survey,
+        )
         return
+
+    if args.from_survey:
+        raise SystemExit("--from-survey 需要配合 --workflow 使用")
 
     settings = load_settings()
     client = OpenAICompatClient(settings)
