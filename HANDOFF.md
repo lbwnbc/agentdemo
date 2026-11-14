@@ -41,6 +41,7 @@
 | `b19ffe5` | 第 10 步：工作流参数化（`RunSpec` + 六档预设 + 档位驱动校验） |
 | `1d959fb` | 第 11 步：仅搜集模式（检索式规划 + L0–L3 逐级放宽 + 清单落盘） |
 | `4032a87` | 第 12 步：深度分层（候选集 + Top-K 选择 + 逐篇精读，证据分 `fulltext`/`abstract`） |
+| `7641a1b` | 交接与设计文档同步第 12 步（实测成本、两条新坑） |
 
 **当前已全部推送到 GitHub**（`origin/main` 与本地一致）。旧智谱 key 已在后台禁用并更换，新 key 只存在本地 `.env`（已 gitignore）。
 
@@ -101,7 +102,7 @@ ROADMAP.md                    原始分步计划与 pi 代码参考
 ## 六、运行方式
 
 ```powershell
-# 1) 首次：复制 .env.example 为 .env，填入新的智谱 key（旧 key 已泄露，务必作废重发）
+# 1) 首次：复制 .env.example 为 .env，填 LLM_API_KEY / LLM_BASE_URL / LLM_MODEL（OpenAI 兼容，默认 deepseek-v4.1-flash）
 python main.py "LLM agent memory 的研究现状"
 
 # 2) 续聊（复用 session.jsonl 历史）
@@ -153,7 +154,7 @@ python main.py --web --port 8000
 
 1. **GitHub 推送时好时坏**：2026-11-05 上午 TCP 可达但 TLS 握手失败（curl 退出码 35），同日下午已恢复正常推送。若再遇到 `Failed to connect to github.com port 443`，先 `git push` 重试，别急着查凭据。
 2. **长输出阶段容易超时**：report 一次要生成 7K+ completion tokens，默认 `LLM_TIMEOUT=120` 仍可能撞 read timeout。跑 `--workflow` 前建议设 `LLM_TIMEOUT=300`。
-3. **PDF 下载恢复但不算稳定**：此前 `arxiv.org/pdf` 超时，2026-11-05 实测 7 篇全部下载成功。失败时 collect 提示词允许降级为摘要级证据（`kind=background`）。
+3. **PDF 下载偶发失败**：2026-11-05 实测 7 篇全部成功，第 12 步 8 篇也全部成功；失败时 `read_paper` 返回结构化错误，模型按摘要写卡，由调度把该卡标成 `abstract`（不可被报告引用），整篇完全无产出才算精读失败。
 4. **GitHub 仓库是 public**，旧 key 已禁用更换；新 key 只在本地 `.env`。
 5. **缺少提交到仓库的自动化测试**：目前的验证脚本是临时的（写在 `%TEMP%`），删掉即失。第 9 步应把 golden set 与工具测试固化到 `tests/`。
 6. **笔记库按会话隔离**，没有跨会话的长期文献库；同一篇论文重复精读会产生重复笔记。
