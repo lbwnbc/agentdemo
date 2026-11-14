@@ -23,6 +23,7 @@ from urllib.parse import parse_qs, urlparse
 from litagent.config import PROJECT_ROOT, _load_dotenv, load_settings
 from litagent.llm.openai_compat import OpenAICompatClient
 from litagent.run_spec import resolve
+from litagent.survey import read_index
 from litagent.tools import build_default_registry
 from litagent.types import AgentEvent
 from litagent.workflow import WorkflowError, run_workflow
@@ -30,6 +31,8 @@ from litagent.workspace import workspace_root
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 PHASES = ("plan", "collect", "outline", "report")
+SURVEY_PHASES = ("plan", "collect")
+MODE_PHASES = {"deep": PHASES, "survey": SURVEY_PHASES}
 ARTIFACTS = {
     "plan": ("plan.json", "application/json"),
     "evidence": ("evidence.jsonl", "application/x-ndjson"),
@@ -37,6 +40,7 @@ ARTIFACTS = {
     "report": ("report.md", "text/markdown"),
 }
 SESSION_RE = re.compile(r"[^A-Za-z0-9_.-]")
+SURVEY_ID_RE = re.compile(r"^sv_[A-Za-z0-9_]+$")
 
 
 def safe_session(value):
@@ -152,6 +156,68 @@ def list_sessions():
     return items
 
 
+def surveys_paths(session):
+    return workspace_root() / session / "surveys"
+
+
+def _read_jsonl_any(path):
+    records = []
+    if not path.exists():
+        return records
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            record = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(record, dict):
+            records.append(record)
+    return records
+
+
+def list_surveys(session):
+    """列出会话下的仅搜集清单（第 14 步）：读 surveys/index.json。"""
+    index = read_index(surveys_paths(session))
+    items = []
+    for entry in index.get("surveys") or []:
+        survey_id = entry.get("survey_id")
+        if not survey_id or not SURVEY_ID_RE.match(str(survey_id)):
+            continue
+        items.append(
+            {
+                "survey_id": survey_id,
+                "topic": entry.get("topic") or "",
+                "mode": entry.get("mode") or "survey",
+                "level": entry.get("level") or "",
+                "count": entry.get("count") or 0,
+                "status": entry.get("status") or "",
+                "shortfall": entry.get("shortfall") or 0,
+                "max_level": entry.get("max_level") or "",
+                "created_at": entry.get("created_at") or "",
+            }
+        )
+    items.sort(key=lambda item: item["created_at"], reverse=True)
+    return items
+
+
+def read_survey(session, survey_id):
+    """读取单份清单的注册信息与论文列表。"""
+    survey_id = str(survey_id or "").strip()
+    if not SURVEY_ID_RE.match(survey_id):
+        raise ValueError("清单 id 不合法")
+    entry = None
+    for item in list_surveys(session):
+        if item["survey_id"] == survey_id:
+            entry = item
+            break
+    if entry is None:
+        raise ValueError("清单不存在：{}".format(survey_id))
+    papers = _read_jsonl_any(surveys_paths(session) / survey_id / "papers.jsonl")
+    return entry, papers
+
+
 def _describe_event(event, tool_names):
     """把 Event 转成前端可渲染的小体积 JSON，避免把完整消息塞进 SSE。"""
     kind = event.type
@@ -222,7 +288,9 @@ class Job:
         self.resume = resume
         self.spec = spec
         self.events = []
-        self.stages = {name: "pending" for name in PHASES}
+        self.stages = {
+            name: "pending" for name in MODE_PHASES.get(spec.mode, PHASES)
+        }
         self.result = None
         self.error = None
         self.done = False
@@ -258,6 +326,7 @@ class Job:
             "mode": self.spec.mode,
             "level": self.spec.level,
             "target_min": self.spec.target_min,
+            "survey_ids": list(self.spec.survey_ids),
             "stages": dict(self.stages),
             "done": self.done,
             "error": self.error,
@@ -339,6 +408,7 @@ class JobManager:
                 "read_k": result.read_k,
                 "plan": result.plan,
                 "survey": result.survey,
+                "partial": result.partial,
                 "evidence": result.evidence,
                 "outline": result.outline,
                 "report": result.report,
@@ -407,6 +477,24 @@ class Handler(BaseHTTPRequestHandler):
             return self._send_json(self._status())
         if route == "/api/sessions":
             return self._send_json({"ok": True, "sessions": list_sessions()})
+        if route == "/api/surveys":
+            session = safe_session(
+                query.get("session") or os.environ.get("LITAGENT_SESSION", "default")
+            )
+            return self._send_json(
+                {"ok": True, "session": session, "surveys": list_surveys(session)}
+            )
+        if route == "/api/survey":
+            session = safe_session(
+                query.get("session") or os.environ.get("LITAGENT_SESSION", "default")
+            )
+            try:
+                entry, papers = read_survey(session, query.get("id"))
+            except ValueError as exc:
+                return self._send_json({"ok": False, "error": str(exc)}, 404)
+            return self._send_json(
+                {"ok": True, "session": session, "survey": entry, "papers": papers}
+            )
         if route == "/api/artifacts":
             session = safe_session(query.get("session"))
             return self._send_json(
@@ -439,11 +527,18 @@ class Handler(BaseHTTPRequestHandler):
             return self._send_json({"ok": False, "error": "研究主题过长（上限 2000 字）"}, 400)
         session = safe_session(payload.get("session"))
         resume = bool(payload.get("resume"))
+        survey_ids = payload.get("survey_ids") or []
+        if isinstance(survey_ids, str):
+            survey_ids = [survey_ids]
+        if not isinstance(survey_ids, list):
+            return self._send_json({"ok": False, "error": "survey_ids 必须是数组"}, 400)
+        survey_ids = [str(item).strip() for item in survey_ids if str(item).strip()]
         try:
             spec = resolve(
                 topic,
                 mode=payload.get("mode") or "deep",
                 level=payload.get("level") or "low",
+                survey_ids=survey_ids,
             )
         except ValueError as exc:
             return self._send_json({"ok": False, "error": str(exc)}, 400)
@@ -461,6 +556,7 @@ class Handler(BaseHTTPRequestHandler):
                     "mode": job.spec.mode,
                     "level": job.spec.level,
                     "target_min": job.spec.target_min,
+                    "survey_ids": list(job.spec.survey_ids),
                 },
             }
         )
@@ -497,19 +593,34 @@ class Handler(BaseHTTPRequestHandler):
     def _download(self, query):
         session = safe_session(query.get("session"))
         name = query.get("name")
+        if name == "survey":
+            survey_id = str(query.get("id") or "").strip()
+            if not SURVEY_ID_RE.match(survey_id):
+                return self._send_json({"ok": False, "error": "清单 id 不合法"}, 404)
+            path = surveys_paths(session) / survey_id / "papers.jsonl"
+            if not path.exists():
+                return self._send_json({"ok": False, "error": "清单不存在"}, 404)
+            return self._send_file(
+                path.read_bytes(),
+                "application/x-ndjson",
+                "{}-{}.jsonl".format(session, survey_id),
+            )
         if name not in ARTIFACTS:
             return self._send_json({"ok": False, "error": "未知产物"}, 404)
         filename, content_type = ARTIFACTS[name]
         path = workflow_paths(session) / filename
         if not path.exists():
             return self._send_json({"ok": False, "error": "产物不存在，请先运行"}, 404)
-        body = path.read_bytes()
+        return self._send_file(
+            path.read_bytes(), content_type, "{}-{}".format(session, filename)
+        )
+
+    def _send_file(self, body, content_type, filename):
         self.send_response(200)
         self.send_header("Content-Type", content_type + "; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
         self.send_header(
-            "Content-Disposition",
-            'attachment; filename="{}-{}"'.format(session, filename),
+            "Content-Disposition", 'attachment; filename="{}"'.format(filename)
         )
         self.send_header("Cache-Control", "no-store")
         self.end_headers()

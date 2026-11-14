@@ -200,6 +200,47 @@ def print_survey(result):
         print("…其余 {} 篇见清单文件".format(len(papers) - 20))
 
 
+def run_eval_mode(cases_filter=None, combos=None, out_dir=None):
+    """评测基线（第 14 步）：用例 × 六种组合，输出对比表并落盘。"""
+    from litagent.eval import format_table, load_cases, parse_combos, run_eval
+
+    cases = load_cases()
+    if cases_filter:
+        wanted = [item.strip() for item in cases_filter.split(",") if item.strip()]
+        known = set(item["id"] for item in cases)
+        unknown = [item for item in wanted if item not in known]
+        if unknown:
+            raise SystemExit(
+                "未知评测用例：{}；可选 {}".format("、".join(unknown), "、".join(sorted(known)))
+            )
+        cases = [item for item in cases if item["id"] in wanted]
+    try:
+        combos = parse_combos(combos)
+        settings = load_settings()
+    except ValueError as exc:
+        raise SystemExit(str(exc))
+    except RuntimeError as exc:
+        raise SystemExit(str(exc))
+
+    client = OpenAICompatClient(settings)
+    print(
+        "[eval] {} 个用例 × {} 种组合 = {} 次运行".format(
+            len(cases), len(combos), len(cases) * len(combos)
+        )
+    )
+    records, json_path, md_path = run_eval(
+        cases, combos, out_dir=out_dir, client=client, on_phase=print_phase
+    )
+    print()
+    print(format_table(records))
+    print()
+    print("记录: {}".format(json_path))
+    print("对比表: {}".format(md_path))
+    failed = [record for record in records if record["metrics"].get("status") == "error"]
+    if failed:
+        raise SystemExit("有 {} 次运行失败，详见记录文件".format(len(failed)))
+
+
 def main():
     parser = argparse.ArgumentParser(description="文献调研智能体")
     parser.add_argument("prompt", nargs="?", default=DEFAULT_QUESTION, help="研究主题或追问")
@@ -230,7 +271,35 @@ def main():
     )
     parser.add_argument("--web", action="store_true", help="启动本地 Web 交互界面")
     parser.add_argument("--port", type=int, default=8000, help="Web 界面端口，默认 8000")
+    parser.add_argument(
+        "--eval",
+        action="store_true",
+        help="跑评测基线：eval/cases/ 的用例 × 六种模式/档位组合，输出对比表",
+    )
+    parser.add_argument(
+        "--eval-cases",
+        metavar="IDS",
+        help="只跑指定用例（逗号分隔的 id），默认跑全部",
+    )
+    parser.add_argument(
+        "--eval-combos",
+        metavar="COMBOS",
+        help="只跑指定组合，如 survey/low,deep/low，默认六种组合",
+    )
+    parser.add_argument(
+        "--eval-out",
+        metavar="DIR",
+        help="评测结果目录，默认 eval/results/",
+    )
     args = parser.parse_args()
+
+    if args.eval:
+        run_eval_mode(
+            cases_filter=args.eval_cases,
+            combos=args.eval_combos,
+            out_dir=args.eval_out,
+        )
+        return
 
     if args.web:
         serve_web(port=args.port)

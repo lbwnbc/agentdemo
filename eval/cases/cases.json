@@ -1,0 +1,16 @@
+{
+  "cases": [
+    {
+      "id": "agent-memory",
+      "topic": "LLM 智能体记忆机制研究现状（2022 年以来）"
+    },
+    {
+      "id": "rag-citation",
+      "topic": "检索增强生成中的引用溯源与事实性评测"
+    },
+    {
+      "id": "code-agent-tools",
+      "topic": "面向代码仓库的 LLM 智能体工具调用可靠性"
+    }
+  ]
+}

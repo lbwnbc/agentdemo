@@ -178,7 +178,7 @@ flowchart TD
 | 系统提示词 + Skills 渐进式披露 | `system-prompt.ts`、`skills.ts` | `prompt/system.md`；Skills 未做 | 部分 |
 | 会话持久化 + 上下文压缩 | `session-manager.ts`、`compaction/` | `session.py`、`compaction.py` | 已实现 |
 | 工作流编排 / 子代理隔离 | `agent-session-runtime.ts`、`pi-subagents` | `workflow.py`（单进程顺序阶段，无子代理） | 部分 |
-| 评测（golden set / 指标） | `packages/evals`、`agent-loop.test.ts` | 未开始 | 计划 |
+| 评测（golden set / 指标） | `packages/evals`、`agent-loop.test.ts` | `eval.py` + `eval/cases` + `--eval`（结构级指标与对比表）；golden set 未做 | 部分 |
 | 交互层 | `packages/tui` | `web/server.py` + `static/index.html`（Web 替代 TUI） | 已实现 |
 
 #### B. pi 没有、我们新加的（文献领域层与应用层）
@@ -203,7 +203,7 @@ flowchart TD
 - **文献层**：arXiv 检索与元数据、PDF 下载与按页解析、笔记保存与检索
 - **流程层**：Plan → Collect → Outline → Report 四阶段、阶段重试、产物落盘、按阶段 `resume`
 - **质量层**：证据卡提交、引用结构校验、`degraded` 降级、Collect 下限校验
-- **交互层**：本地 Web（阶段卡片、实时日志、计划/证据/大纲/报告四视图、事件回放）
+- **交互层**：本地 Web（模式/档位/清单多选、阶段卡片随模式切换、实时日志、计划/证据/大纲/报告/清单五视图、事件回放、清单导出）
 
 #### D. 预计实现的（对应 §8 里程碑）
 
@@ -284,7 +284,7 @@ RunSpec(
 | Collect 校验 | `MIN_COLLECT_PAPERS = 5` 写死 | 改为 `target_min`（来自档位） |
 | 产物落盘 | `plan.json` / `evidence.jsonl` / `outline.md` / `report.md` | 新增 `surveys/<id>/papers.jsonl` 与 `index.json` |
 | 会话 / 压缩 | 自由模式可用，工作流未接入 | 本轮不做，列入后续 |
-| Web | 单任务、四阶段卡片 | 增加模式/档位选择与清单多选；阶段卡片随模式变化 |
+| Web | 单任务、四阶段卡片 | 已实现：模式/档位选择、清单多选（≤3）、阶段卡片随模式变化、清单页阅读与导出 |
 
 ---
 

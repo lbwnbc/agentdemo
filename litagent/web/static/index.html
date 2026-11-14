@@ -122,6 +122,25 @@
   }
   .examples button:hover { color: var(--accent); border-color: rgba(79, 224, 200, .4); }
   .row { display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: center; }
+  .row2 { display: grid; grid-template-columns: 1fr 92px; gap: 8px; align-items: center; }
+  .field-hint { margin-top: 6px; font-size: 11px; color: var(--muted); line-height: 1.5; }
+  .survey-picker {
+    border: 1px solid var(--rule); border-radius: 9px; background: var(--bg3);
+    max-height: 148px; overflow: auto;
+  }
+  .survey-picker .empty-mini { padding: 10px 11px; font-size: 11.5px; color: var(--muted); }
+  .survey-item {
+    display: flex; align-items: flex-start; gap: 8px;
+    padding: 8px 10px; border-bottom: 1px solid var(--rule);
+    font-size: 11.5px; line-height: 1.5; cursor: pointer;
+  }
+  .survey-item:last-child { border-bottom: 0; }
+  .survey-item:hover { background: rgba(255,255,255,.025); }
+  .survey-item input { margin-top: 2px; accent-color: #4fe0c8; flex: none; }
+  .survey-item .st { color: var(--muted); font-family: var(--mono); font-size: 10px; }
+  .survey-item.partial .st { color: var(--warn); }
+  .survey-item b { color: var(--ink); font-weight: 550; display: block; }
+  .survey-item .meta { color: var(--muted); font-family: var(--mono); font-size: 10px; margin-top: 2px; }
   .switch {
     display: flex; align-items: center; gap: 9px;
     padding: 10px 11px; border: 1px solid var(--rule); border-radius: 9px;
@@ -170,6 +189,7 @@
     border: 1px solid var(--rule); color: var(--muted);
   }
   .badge.live { color: var(--accent); border-color: rgba(79,224,200,.4); background: rgba(79,224,200,.06); }
+  .badge.partial { color: var(--warn); border-color: rgba(245,181,69,.45); background: rgba(245,181,69,.08); }
 
   .phases { display: grid; grid-template-columns: repeat(4, 1fr); gap: 9px; }
   .phase {
@@ -202,10 +222,12 @@
   .phase[data-status="degraded"] .dot { background: var(--warn); }
   .phase[data-status="failed"] { border-color: rgba(248,113,113,.45); }
   .phase[data-status="failed"] .dot { background: var(--err); }
+  .phase[data-partial="1"] { border-color: rgba(245,181,69,.55); background: rgba(245,181,69,.06); }
+  .phase[data-partial="1"] .dot { background: var(--warn); }
   @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .35; } }
   @keyframes sweep { from { transform: translateX(-100%); } to { transform: translateX(100%); } }
 
-  .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 9px; margin: 12px 0 0; }
+  .stats { display: grid; grid-template-columns: repeat(5, 1fr); gap: 9px; margin: 12px 0 0; }
   .stat { border: 1px solid var(--rule); border-radius: 9px; padding: 8px 11px; background: rgba(255,255,255,.012); }
   .stat .num { font-family: var(--mono); font-size: 17px; font-weight: 600; color: var(--ink); }
   .stat .lab { font-size: 10.5px; color: var(--muted); letter-spacing: .04em; margin-top: 1px; }
@@ -348,6 +370,20 @@
     background: var(--img); border: 1px solid var(--rule); border-radius: 5px; padding: 2px 6px;
     word-break: break-word;
   }
+  .survey-head { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; margin-bottom: 12px; }
+  .survey-head .title { font-size: 14px; font-weight: 600; }
+  .survey-table-wrap { overflow-x: auto; border: 1px solid var(--rule); border-radius: 9px; }
+  .survey-table { border-collapse: collapse; width: 100%; font-size: 12.5px; }
+  .survey-table th, .survey-table td {
+    padding: 8px 10px; border-bottom: 1px solid var(--rule);
+    text-align: left; vertical-align: top; line-height: 1.55;
+  }
+  .survey-table th { background: var(--img); color: #cfe0ec; font-weight: 600; white-space: nowrap; }
+  .survey-table tr:last-child td { border-bottom: 0; }
+  .survey-table td.num { font-family: var(--mono); white-space: nowrap; color: var(--muted); }
+  .survey-table td.title a { color: var(--ink); text-decoration: none; }
+  .survey-table td.title a:hover { color: var(--accent); }
+  .survey-topic { font-size: 12.5px; color: #c6d4df; line-height: 1.6; }
 
   .empty { color: var(--muted); font-size: 12.5px; line-height: 1.9; padding: 26px 4px; }
   .empty b { color: var(--ink); font-weight: 600; }
@@ -404,6 +440,30 @@
         </div>
 
         <div class="field">
+          <label>模式与档位</label>
+          <div class="row2">
+            <select id="mode" title="调研模式">
+              <option value="deep">深度调研 · deep</option>
+              <option value="survey">仅搜集 · survey</option>
+            </select>
+            <select id="level" title="档位">
+              <option value="low">low</option>
+              <option value="mid">mid</option>
+              <option value="high">high</option>
+            </select>
+          </div>
+          <div class="field-hint" id="preset-hint">深度调研 · low：10–15 篇候选，精读 8 篇</div>
+        </div>
+
+        <div class="field" id="survey-field">
+          <label>导入清单 <span id="survey-pick-count">0/3</span></label>
+          <div class="survey-picker" id="survey-picker">
+            <div class="empty-mini">当前会话还没有仅搜集清单。</div>
+          </div>
+          <div class="field-hint">深度调研可导入 1–3 份清单作为候选池（不检索、不补检）。</div>
+        </div>
+
+        <div class="field">
           <label class="switch">
             <input type="checkbox" id="resume">
             <span>复用已落盘产物
@@ -431,6 +491,7 @@
         <div class="stats">
           <div class="stat acc"><div class="num" id="stat-tokens">—</div><div class="lab">TOKENS</div></div>
           <div class="stat"><div class="num" id="stat-steps">—</div><div class="lab">步数</div></div>
+          <div class="stat"><div class="num" id="stat-candidates">—</div><div class="lab">候选篇数</div></div>
           <div class="stat"><div class="num" id="stat-evidence">—</div><div class="lab">证据卡</div></div>
           <div class="stat warn"><div class="num" id="stat-issues">—</div><div class="lab">引用问题</div></div>
         </div>
@@ -442,6 +503,7 @@
         <button class="tab" data-tab="evidence">证据库<span class="count" id="ev-count"></span></button>
         <button class="tab" data-tab="outline">大纲</button>
         <button class="tab" data-tab="plan">计划</button>
+        <button class="tab" data-tab="survey">清单<span class="count" id="survey-count"></span></button>
         <div class="tabbar-right">
           <a class="ghost-btn" id="download" href="#" hidden>下载 .md</a>
         </div>
@@ -455,6 +517,7 @@
         <div class="tab-panel" data-panel="evidence" id="panel-evidence"></div>
         <div class="tab-panel" data-panel="outline" id="panel-outline"></div>
         <div class="tab-panel" data-panel="plan" id="panel-plan"></div>
+        <div class="tab-panel" data-panel="survey" id="panel-survey"></div>
       </div>
     </section>
   </main>
@@ -464,16 +527,29 @@
 (function () {
   "use strict";
 
-  var PHASES = [
-    { id: "plan", label: "规划", sub: "Plan" },
-    { id: "collect", label: "检索", sub: "Collect" },
-    { id: "outline", label: "大纲", sub: "Outline" },
-    { id: "report", label: "成稿", sub: "Report" }
-  ];
+  var PHASE_DEFS = {
+    plan: { label: "规划", sub: "Plan" },
+    collect: { label: "检索", sub: "Collect" },
+    outline: { label: "大纲", sub: "Outline" },
+    report: { label: "成稿", sub: "Report" }
+  };
+  var MODE_PHASES = {
+    deep: ["plan", "collect", "outline", "report"],
+    survey: ["plan", "collect"]
+  };
   var PHASE_LABEL = { plan: "规划", collect: "检索", outline: "大纲", report: "成稿" };
   var STATUS_LABEL = {
     start: "进行中", done: "完成", skipped: "复用产物", retry: "重试",
     degraded: "降级通过", failed: "失败", pending: "等待"
+  };
+  var MODE_LABEL = { deep: "深度调研", survey: "仅搜集" };
+  var PRESETS = {
+    "survey/low": "10–15 篇候选，单轮检索",
+    "survey/mid": "15–100 篇候选，多检索式 + 分页",
+    "survey/high": "100–500 篇候选，逐级放宽 + 分页",
+    "deep/low": "10–15 篇候选，精读 8 篇",
+    "deep/mid": "15–30 篇候选，精读 12 篇",
+    "deep/high": "30–50 篇候选，精读 20 篇"
   };
   var DL_MAP = { report: "report", outline: "outline", evidence: "evidence", plan: "plan" };
 
@@ -481,11 +557,16 @@
     jobId: null,
     running: false,
     session: "default",
+    mode: "deep",
+    surveyId: "",
+    surveys: [],
+    pickedSurveys: [],
     source: "",
     result: null,
     evidenceList: [],
     phaseUsage: {},
     liveEvidence: 0,
+    liveCandidates: null,
     es: null,
     lastTopic: ""
   };
@@ -495,6 +576,11 @@
   var sessionInput = el("session");
   var sessionList = el("session-list");
   var resumeInput = el("resume");
+  var modeSelect = el("mode");
+  var levelSelect = el("level");
+  var surveyPicker = el("survey-picker");
+  var surveyPickCount = el("survey-pick-count");
+  var presetHint = el("preset-hint");
   var runBtn = el("run-btn");
   var hint = el("hint");
   var logEl = el("log");
@@ -520,19 +606,28 @@
     hint.className = "hint" + (isError ? " err" : "");
   }
 
-  /* ---------- 阶段卡片 ---------- */
+  /* ---------- 阶段卡片（按 mode 渲染不同阶段集合） ---------- */
   var phaseCards = {};
-  PHASES.forEach(function (phase) {
-    var card = document.createElement("div");
-    card.className = "phase";
-    card.dataset.status = "pending";
-    card.innerHTML =
-      '<div class="top"><span class="dot"></span><span class="name">' + phase.label +
-      '</span><span class="sub">' + phase.sub + '</span></div>' +
-      '<div class="state">等待</div>';
-    el("phases").appendChild(card);
-    phaseCards[phase.id] = card;
-  });
+
+  function buildPhases(mode) {
+    var ids = MODE_PHASES[mode] || MODE_PHASES.deep;
+    var box = el("phases");
+    box.innerHTML = "";
+    box.style.gridTemplateColumns = "repeat(" + ids.length + ", 1fr)";
+    phaseCards = {};
+    ids.forEach(function (id) {
+      var def = PHASE_DEFS[id] || { label: id, sub: id };
+      var card = document.createElement("div");
+      card.className = "phase";
+      card.dataset.status = "pending";
+      card.innerHTML =
+        '<div class="top"><span class="dot"></span><span class="name">' + def.label +
+        '</span><span class="sub">' + def.sub + '</span></div>' +
+        '<div class="state">等待</div>';
+      box.appendChild(card);
+      phaseCards[id] = card;
+    });
+  }
 
   function setPhase(id, status, info) {
     var card = phaseCards[id];
@@ -541,7 +636,23 @@
     var stateEl = card.querySelector(".state");
     var text = STATUS_LABEL[status] || status;
     info = info || {};
-    if (status === "done" && info.fromDisk) {
+    var partial = info.partial || (status === "degraded" && info.shortfall);
+    if (partial) {
+      card.dataset.partial = "1";
+    } else if (status !== "start") {
+      card.dataset.partial = "";
+    }
+    if (partial) {
+      var gap = (info.partial && info.partial.shortfall) || info.shortfall || 0;
+      var lower = (info.partial && info.partial.target_min) || info.target_min;
+      var count = (info.partial && info.partial.candidate_count != null)
+        ? info.partial.candidate_count : info.count;
+      text = "候选 " + fmt(count) + " 篇，缺口 " + gap + " 篇" +
+        (lower ? "（下限 " + lower + "）" : "");
+    } else if (info.reading) {
+      text = "精读 " + info.reading.index + "/" + info.reading.total +
+        " · " + (info.reading.arxiv_id || "");
+    } else if (status === "done" && info.fromDisk) {
       text = "已落盘";
     } else if (status === "done") {
       var parts = [];
@@ -558,10 +669,11 @@
     stateEl.textContent = text;
   }
 
-  function resetPhases() {
+  function resetPhases(mode) {
     state.phaseUsage = {};
     state.liveEvidence = 0;
-    PHASES.forEach(function (phase) { setPhase(phase.id, "pending", {}); });
+    state.liveCandidates = null;
+    buildPhases(mode || state.mode);
   }
 
   function recomputeStats() {
@@ -573,6 +685,7 @@
     el("stat-tokens").textContent = tokens ? fmt(tokens) : "—";
     el("stat-steps").textContent = steps ? steps : "—";
     el("stat-evidence").textContent = state.liveEvidence || "—";
+    el("stat-candidates").textContent = state.liveCandidates == null ? "—" : fmt(state.liveCandidates);
   }
 
   /* ---------- 日志 ---------- */
@@ -794,6 +907,161 @@
     }).join("") + "</div>";
   }
 
+  /* ---------- 清单（仅搜集产物） ---------- */
+  function partialInfo(result) {
+    if (!result) return null;
+    if (result.partial) return result.partial;
+    var survey = result.survey;
+    if (survey && survey.status === "partial") {
+      return {
+        candidate_count: survey.count || 0,
+        target_min: result.target_min || 0,
+        shortfall: survey.shortfall || 0,
+        survey_ids: survey.survey_id ? [survey.survey_id] : []
+      };
+    }
+    return null;
+  }
+
+  function partialBanner(info, kind) {
+    if (!info) return "";
+    var reason = "已走完逐级放宽检索。";
+    if (info.survey_ids && info.survey_ids.length) {
+      reason = "候选池来自清单导入，按约定不做补充检索。";
+    } else if (kind === "survey") {
+      reason = "仅搜集模式按档位约定停止，不做补充检索。";
+    }
+    return '<div class="banner warn"><b>候选池未达档位下限</b><br>' +
+      "候选 " + esc(fmt(info.candidate_count)) + " 篇，低于下限 " +
+      esc(fmt(info.target_min)) + " 篇（差 " + esc(fmt(info.shortfall)) + " 篇）；" +
+      reason + "</div>";
+  }
+
+  function renderSurveyPicker() {
+    state.pickedSurveys = [];
+    surveyPickCount.textContent = "0/3";
+    if (state.mode !== "deep") {
+      surveyPicker.innerHTML = '<div class="empty-mini">仅搜集模式不导入清单。</div>';
+      return;
+    }
+    if (!state.surveys.length) {
+      surveyPicker.innerHTML =
+        '<div class="empty-mini">当前会话还没有仅搜集清单。先跑一次 survey 模式即可。</div>';
+      return;
+    }
+    surveyPicker.innerHTML = state.surveys.map(function (item) {
+      return '<label class="survey-item' + (item.status === "partial" ? " partial" : "") +
+        '"><input type="checkbox" value="' + esc(item.survey_id) + '">' +
+        "<span><b>" + esc(item.topic || "（无主题）") + "</b>" +
+        '<span class="meta">' + esc(item.survey_id) + " · " + esc(item.level || "-") +
+        " · " + esc(item.count) + " 篇</span>" +
+        '<span class="st">' + esc(item.status) +
+        (item.status === "partial" ? " · 缺 " + esc(item.shortfall) : "") +
+        "</span></span></label>";
+    }).join("");
+  }
+
+  function renderSurveyList() {
+    var box = el("panel-survey");
+    if (!state.surveys.length) {
+      box.innerHTML = emptyHtml(
+        "还没有清单",
+        "跑一次仅搜集（survey）模式后，清单会出现在这里；也可以在左侧把它作为深度调研的候选池。"
+      );
+      return;
+    }
+    var rows = state.surveys.map(function (item) {
+      var href = "/api/file?session=" + encodeURIComponent(state.session) +
+        "&name=survey&id=" + encodeURIComponent(item.survey_id);
+      return "<tr>" +
+        "<td>" + esc(item.topic || "（无主题）") + "</td>" +
+        '<td class="num">' + esc(item.level || "-") + "</td>" +
+        '<td class="num">' + esc(item.count) + "</td>" +
+        '<td class="num">' + esc(item.status) +
+        (item.status === "partial" ? " · 缺 " + esc(item.shortfall) : "") + "</td>" +
+        '<td class="num">' + esc(item.created_at || "-") + "</td>" +
+        '<td><button class="ghost-btn" data-survey="' + esc(item.survey_id) +
+        '">查看</button> <a class="ghost-btn" href="' + href + '">导出 .jsonl</a></td>' +
+        "</tr>";
+    }).join("");
+    box.innerHTML =
+      '<div class="survey-head"><span class="title">会话 ' + esc(state.session) +
+      " 的清单</span><span class=\"st\">" + state.surveys.length + " 份</span></div>" +
+      '<div class="survey-table-wrap"><table class="survey-table">' +
+      "<thead><tr><th>主题</th><th>档位</th><th>篇数</th><th>状态</th><th>创建时间</th><th>操作</th></tr></thead>" +
+      "<tbody>" + rows + "</tbody></table></div>";
+  }
+
+  function renderSurveyTable(papers) {
+    if (!papers || !papers.length) {
+      return emptyHtml("清单是空的", "检索没有归集到论文，可换档位或稍后重试。");
+    }
+    var rows = papers.map(function (paper, index) {
+      var title = esc(paper.title || "");
+      var link = paper.arxiv_id
+        ? '<a href="https://arxiv.org/abs/' + esc(paper.arxiv_id) +
+          '" target="_blank" rel="noopener">' + title + "</a>"
+        : title;
+      return "<tr>" +
+        '<td class="num">' + esc(paper.rank || index + 1) + "</td>" +
+        '<td class="num">' + esc(paper.year || "-") + "</td>" +
+        '<td class="num">' + esc(paper.arxiv_id || "-") + "</td>" +
+        '<td class="title">' + link + "</td>" +
+        '<td class="num">' + esc(paper.query_level || "-") + "</td>" +
+        '<td class="num">' + esc((paper.matched_queries || []).length) + "</td>" +
+        "</tr>";
+    }).join("");
+    return '<div class="survey-table-wrap"><table class="survey-table">' +
+      "<thead><tr><th>#</th><th>年份</th><th>arXiv</th><th>标题</th><th>级别</th><th>命中检索式</th></tr></thead>" +
+      "<tbody>" + rows + "</tbody></table></div>";
+  }
+
+  function renderSurveyDetail(survey, papers) {
+    var href = "/api/file?session=" + encodeURIComponent(state.session) +
+      "&name=survey&id=" + encodeURIComponent(survey.survey_id);
+    var partial = survey.status === "partial";
+    el("panel-survey").innerHTML =
+      '<div class="survey-head"><span class="title">' + esc(survey.topic || "清单") + "</span>" +
+      '<span class="badge">' + esc(survey.survey_id) + "</span>" +
+      '<span class="badge">survey/' + esc(survey.level || "-") + "</span>" +
+      '<span class="badge">' + esc(papers.length) + " 篇</span>" +
+      (partial ? '<span class="badge partial">partial</span>' : '<span class="badge">done</span>') +
+      '<a class="ghost-btn" href="' + href + '">导出 .jsonl</a></div>' +
+      partialBanner({
+        candidate_count: survey.count,
+        target_min: survey.count + (survey.shortfall || 0),
+        shortfall: survey.shortfall,
+        survey_ids: []
+      }, "survey") +
+      renderSurveyTable(papers);
+  }
+
+  function showSurveyDetail(id) {
+    if (!id) return;
+    state.surveyId = id;
+    api("/api/survey?session=" + encodeURIComponent(state.session) +
+        "&id=" + encodeURIComponent(id)).then(function (res) {
+      if (!res.ok) {
+        el("panel-survey").innerHTML = emptyHtml("读取清单失败", esc(res.error || ""));
+        return;
+      }
+      renderSurveyDetail(res.survey, res.papers || []);
+      showTab("survey");
+      updateDownload();
+    });
+  }
+
+  function refreshSurveys(session) {
+    return api("/api/surveys?session=" + encodeURIComponent(session || state.session)).then(function (res) {
+      if (!res.ok) return;
+      state.surveys = res.surveys || [];
+      el("survey-count").textContent = state.surveys.length ? state.surveys.length : "";
+      renderSurveyPicker();
+      if (!state.surveyId) renderSurveyList();
+      updateDownload();
+    });
+  }
+
   function renderResult(result) {
     if (!result) return;
     state.result = result;
@@ -803,26 +1071,51 @@
     state.lastTopic = result.topic || state.lastTopic;
 
     var reportHtml = "";
+    var partial = partialInfo(result);
+    if (result.mode && MODE_PHASES[result.mode] && !state.running) {
+      state.mode = result.mode;
+      modeSelect.value = result.mode;
+      var expected = MODE_PHASES[state.mode].join(",");
+      if (Object.keys(phaseCards).join(",") !== expected) buildPhases(state.mode);
+      renderSurveyPicker();
+    }
     if (result.source === "disk") {
       reportHtml += '<div class="banner">已加载会话 <b>' + esc(result.session) +
         "</b> 的历史产物，可直接阅读，也可以重新运行覆盖。</div>";
     }
-    if (result.issues && result.issues.length) {
-      reportHtml += '<div class="banner warn"><b>引用自检未通过（' + result.issues.length +
-        " 项）</b><br>" + result.issues.map(function (issue) {
-          return "· " + esc(issue);
-        }).join("<br>") + "</div>";
+    if (result.survey) {
+      reportHtml += '<div class="banner"><b>仅搜集模式不产出报告</b><br>' +
+        "本轮只归集候选论文的元数据，清单可在「清单」页阅读与导出。</div>";
+      reportHtml += partialBanner(partial);
+      reportHtml += '<div class="survey-head"><span class="title">' +
+        esc(result.survey.topic || result.topic || "") + "</span>" +
+        '<span class="badge">' + esc(result.survey.survey_id || "") + "</span>" +
+        '<span class="badge">' + esc(result.survey.count || 0) + " 篇</span>" +
+        '<span class="badge">' + esc(result.survey.status || "done") + "</span></div>";
+    } else {
+      if (result.issues && result.issues.length) {
+        reportHtml += '<div class="banner warn"><b>引用自检未通过（' + result.issues.length +
+          " 项）</b><br>" + result.issues.map(function (issue) {
+            return "· " + esc(issue);
+          }).join("<br>") + "</div>";
+      }
+      reportHtml += partialBanner(partial);
+      reportHtml += '<div class="md">' + (result.report
+        ? renderMd(result.report)
+        : emptyHtml("还没有报告", "运行 <code>report</code> 阶段后，最终报告会显示在这里。")) +
+        "</div>";
     }
-    reportHtml += '<div class="md">' + (result.report
-      ? renderMd(result.report)
-      : emptyHtml("还没有报告", "运行 <code>report</code> 阶段后，最终报告会显示在这里。")) +
-      "</div>";
     el("panel-report").innerHTML = reportHtml;
 
     el("panel-outline").innerHTML = result.outline
       ? '<div class="md">' + renderMd(result.outline) + "</div>"
-      : emptyHtml("还没有大纲", "运行 <code>outline</code> 阶段后，综述大纲会显示在这里。");
-    el("panel-evidence").innerHTML = renderEvidence(result.evidence);
+      : emptyHtml(
+          result.survey ? "仅搜集模式跳过大纲" : "还没有大纲",
+          result.survey ? "需要综述大纲时，请用深度调研模式。" : "运行 <code>outline</code> 阶段后，综述大纲会显示在这里。"
+        );
+    el("panel-evidence").innerHTML = result.survey
+      ? emptyHtml("仅搜集模式没有证据卡", "候选论文已写入清单，可到「清单」页查看。")
+      : renderEvidence(result.evidence);
     el("panel-plan").innerHTML = renderPlan(result.plan);
 
     el("ev-count").textContent = state.evidenceList.length ? state.evidenceList.length : "";
@@ -833,16 +1126,23 @@
       el("stat-evidence").textContent = result.stats.evidence ? result.stats.evidence : "—";
       el("stat-issues").textContent = result.stats.issues ? result.stats.issues : "0";
     }
+    var candidates = result.survey ? result.survey.count : state.liveCandidates;
+    state.liveCandidates = candidates;
+    el("stat-candidates").textContent = candidates == null ? "—" : fmt(candidates);
+    if (partial) {
+      el("stat-candidates").textContent =
+        fmt(partial.candidate_count) + " / " + fmt(partial.target_min);
+    }
 
     if (result.source === "disk") {
       var flags = {
         plan: !!result.plan,
-        collect: (result.evidence || []).length > 0,
+        collect: (result.evidence || []).length > 0 || !!result.survey,
         outline: !!result.outline,
         report: !!result.report
       };
-      PHASES.forEach(function (phase) {
-        setPhase(phase.id, flags[phase.id] ? "done" : "pending", { fromDisk: true });
+      (MODE_PHASES[state.mode] || MODE_PHASES.deep).forEach(function (id) {
+        setPhase(id, flags[id] ? "done" : "pending", { fromDisk: true });
       });
     }
 
@@ -855,6 +1155,14 @@
     var topic = state.result ? (state.result.topic || "") : "";
     if (topic) parts.push('<span class="topic">' + esc(topic) + "</span>");
     parts.push('<span class="badge">会话 ' + esc(state.session) + "</span>");
+    if (state.result && state.result.mode) {
+      parts.push('<span class="badge">' + esc(MODE_LABEL[state.result.mode] || state.result.mode) + "</span>");
+    }
+    if (state.result && state.result.level) {
+      parts.push('<span class="badge">' + esc(state.result.level) + "</span>");
+    }
+    var gap = partialInfo(state.result);
+    if (gap) parts.push('<span class="badge partial">缺口 ' + esc(gap.shortfall) + " 篇</span>");
     if (state.source === "disk") parts.push('<span class="badge">历史产物</span>');
     if (state.running) parts.push('<span class="badge live">运行中</span>');
     var meta = el("run-meta");
@@ -864,6 +1172,13 @@
 
   function updateDownload() {
     var active = document.querySelector(".tab.active");
+    if (active && active.dataset.tab === "survey" && state.surveyId) {
+      downloadEl.hidden = false;
+      downloadEl.textContent = "下载清单 .jsonl";
+      downloadEl.href = "/api/file?session=" + encodeURIComponent(state.session) +
+        "&name=survey&id=" + encodeURIComponent(state.surveyId);
+      return;
+    }
     var name = active ? DL_MAP[active.dataset.tab] : null;
     if (!name || !state.session) {
       downloadEl.hidden = true;
@@ -918,9 +1233,23 @@
         };
         recomputeStats();
       }
-      if (payload.status === "done" && payload.phase === "collect" && payload.info && payload.info.count) {
-        state.liveEvidence = payload.info.count;
-        el("stat-evidence").textContent = state.liveEvidence;
+      if ((payload.status === "done" || payload.status === "degraded") &&
+          payload.phase === "collect" && payload.info) {
+        if (payload.info.count && state.mode !== "survey") {
+          state.liveEvidence = payload.info.count;
+          el("stat-evidence").textContent = state.liveEvidence;
+        }
+        var candidates = payload.info.candidates;
+        if (candidates == null && state.mode === "survey") candidates = payload.info.count;
+        if (candidates != null) {
+          state.liveCandidates = candidates;
+          el("stat-candidates").textContent = fmt(candidates);
+        }
+      }
+      if (payload.info && payload.info.partial) {
+        state.liveCandidates = payload.info.partial.candidate_count;
+        el("stat-candidates").textContent = fmt(payload.info.partial.candidate_count) +
+          " / " + fmt(payload.info.partial.target_min);
       }
     } else if (payload.kind === "finished") {
       state.running = false;
@@ -930,9 +1259,10 @@
         loadResult(state.jobId);
       } else {
         var failure = payload.error || "工作流失败";
-        PHASES.forEach(function (phase) {
-          if (phaseCards[phase.id].dataset.status === "start") {
-            setPhase(phase.id, "failed", { problems: [failure] });
+        (MODE_PHASES[state.mode] || MODE_PHASES.deep).forEach(function (id) {
+          var card = phaseCards[id];
+          if (card && card.dataset.status === "start") {
+            setPhase(id, "failed", { problems: [failure] });
           }
         });
         setHint(failure, true);
@@ -973,8 +1303,17 @@
     api("/api/result?job=" + encodeURIComponent(jobId)).then(function (res) {
       if (!res.ok) { setHint(res.error || "读取结果失败", true); return; }
       renderResult(res.result);
-      showTab("report");
-      setHint("已完成，产物已写入 workspace/" + state.session + "/workflow/");
+      if (res.result.survey) {
+        state.surveyId = res.result.survey.survey_id;
+        refreshSurveys(state.session).then(function () {
+          showSurveyDetail(state.surveyId);
+        });
+        setHint("已完成，清单已写入 workspace/" + state.session + "/surveys/");
+      } else {
+        showTab("report");
+        refreshSurveys(state.session);
+        setHint("已完成，产物已写入 workspace/" + state.session + "/workflow/");
+      }
     });
   }
 
@@ -987,6 +1326,12 @@
     sessionList.disabled = running;
     resumeInput.disabled = running;
     topicInput.disabled = running;
+    modeSelect.disabled = running;
+    levelSelect.disabled = running;
+    Array.prototype.forEach.call(
+      surveyPicker.querySelectorAll("input"),
+      function (box) { box.disabled = running; }
+    );
     updateMeta();
   }
 
@@ -995,9 +1340,11 @@
     state.result = null;
     state.evidenceList = [];
     state.liveEvidence = 0;
+    state.surveyId = "";
     resetPhases();
     el("stat-tokens").textContent = "—";
     el("stat-steps").textContent = "—";
+    el("stat-candidates").textContent = "—";
     el("stat-evidence").textContent = "—";
     el("stat-issues").textContent = "—";
     el("ev-count").textContent = "";
@@ -1021,6 +1368,8 @@
     session = session.replace(/[^A-Za-z0-9_.-]/g, "") || "default";
     sessionInput.value = session;
     state.session = session;
+    state.mode = modeSelect.value || "deep";
+    var surveyIds = state.mode === "deep" ? state.pickedSurveys.slice() : [];
 
     clearRunView();
     setRunning(true);
@@ -1030,7 +1379,11 @@
     api("/api/run", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ topic: topic, session: session, resume: resumeInput.checked })
+      body: JSON.stringify({
+        topic: topic, session: session, resume: resumeInput.checked,
+        mode: state.mode, level: levelSelect.value || "low",
+        survey_ids: surveyIds
+      })
     }).then(function (res) {
       if (!res.ok) {
         setRunning(false);
@@ -1042,7 +1395,10 @@
       state.lastTopic = topic;
       el("run-meta").innerHTML = '<span class="topic">' + esc(topic) +
         '</span><span class="badge">会话 ' + esc(session) +
-        "</span>" + (res.job.resume ? '<span class="badge">resume</span>' : "") +
+        '</span><span class="badge">' + esc(MODE_LABEL[state.mode] || state.mode) +
+        '</span><span class="badge">' + esc(levelSelect.value || "low") + "</span>" +
+        (surveyIds.length ? '<span class="badge">清单 ' + surveyIds.length + " 份</span>" : "") +
+        (res.job.resume ? '<span class="badge">resume</span>' : "") +
         '<span class="badge live">运行中</span>';
       setHint("运行中，日志会实时刷新。");
       connectEvents(state.jobId, 0);
@@ -1064,9 +1420,11 @@
     state.evidenceList = [];
     state.source = "";
     state.liveEvidence = 0;
+    state.liveCandidates = null;
     resetPhases();
     el("stat-tokens").textContent = "—";
     el("stat-steps").textContent = "—";
+    el("stat-candidates").textContent = "—";
     el("stat-evidence").textContent = "—";
     el("stat-issues").textContent = "—";
     el("ev-count").textContent = "";
@@ -1077,16 +1435,20 @@
   /* ---------- 历史产物 ---------- */
   function loadArtifacts(session) {
     if (!session || state.running) return;
+    state.session = session;
+    state.mode = "deep";
+    modeSelect.value = "deep";
+    state.surveyId = "";
+    resetPhases("deep");
+    refreshSurveys(session);
     api("/api/artifacts?session=" + encodeURIComponent(session)).then(function (res) {
       if (!res.ok) return;
       if (res.result) {
-        state.session = session;
         renderResult(res.result);
         state.result = res.result;
         showTab("report");
         setHint("已加载会话 " + session + " 的历史产物。");
       } else {
-        state.session = session;
         renderIdle();
         setHint("会话 " + session + " 还没有产物，填写主题后即可开始调研。");
       }
@@ -1128,9 +1490,44 @@
     });
   }
 
+  function updatePresetHint() {
+    var mode = modeSelect.value || "deep";
+    var level = levelSelect.value || "low";
+    presetHint.textContent = (MODE_LABEL[mode] || mode) + " · " + level + "：" +
+      (PRESETS[mode + "/" + level] || "");
+    el("survey-field").style.display = mode === "deep" ? "" : "none";
+  }
+
   function init() {
     renderExamples();
     renderIdle();
+    updatePresetHint();
+    modeSelect.addEventListener("change", function () {
+      state.mode = modeSelect.value;
+      updatePresetHint();
+      renderSurveyPicker();
+      buildPhases(state.mode);
+    });
+    levelSelect.addEventListener("change", updatePresetHint);
+    surveyPicker.addEventListener("change", function (event) {
+      var box = event.target;
+      if (!box || box.type !== "checkbox") return;
+      var checked = Array.prototype.filter.call(
+        surveyPicker.querySelectorAll("input:checked"),
+        function (item) { return item; }
+      );
+      if (checked.length > 3) {
+        box.checked = false;
+        setHint("一次最多导入 3 份清单", true);
+        return;
+      }
+      state.pickedSurveys = checked.map(function (item) { return item.value; });
+      surveyPickCount.textContent = state.pickedSurveys.length + "/3";
+    });
+    el("panel-survey").addEventListener("click", function (event) {
+      var button = event.target.closest("[data-survey]");
+      if (button) showSurveyDetail(button.dataset.survey);
+    });
     sessionInput.addEventListener("change", function () {
       var name = (sessionInput.value || "").trim() || "default";
       state.session = name;
@@ -1164,17 +1561,22 @@
       if (status.job) {
         sessionInput.value = status.job.session || "default";
         state.session = sessionInput.value;
+        state.mode = status.job.mode || "deep";
+        modeSelect.value = state.mode;
+        levelSelect.value = status.job.level || "low";
+        updatePresetHint();
       } else {
         sessionInput.value = status.session || "default";
         state.session = sessionInput.value;
       }
 
+      refreshSurveys(state.session);
       refreshSessions().then(function () {
         if (status.job && !status.job.done) {
           state.jobId = status.job.id;
           state.running = true;
           setRunning(true);
-          resetPhases();
+          resetPhases(state.mode);
           Object.keys(status.job.stages).forEach(function (key) {
             setPhase(key, status.job.stages[key], {});
           });
@@ -1182,6 +1584,10 @@
           showTab("log");
           connectEvents(status.job.id, 0);
         } else if (status.job && status.job.done) {
+          if (!Object.keys(phaseCards).length ||
+              Object.keys(phaseCards).join(",") !== (MODE_PHASES[state.mode] || MODE_PHASES.deep).join(",")) {
+            buildPhases(state.mode);
+          }
           Object.keys(status.job.stages).forEach(function (key) {
             var stageStatus = status.job.stages[key];
             if (stageStatus === "start") {
