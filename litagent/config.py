@@ -23,12 +23,12 @@ def _load_dotenv(path=PROJECT_ROOT / ".env"):
 @dataclass(frozen=True)
 class Settings:
     api_key: str
-    base_url: str = "https://open.bigmodel.cn/api/paas/v4"
-    model: str = "glm-5.3-flash"
+    base_url: str = "https://api.ystool.top/v1"
+    model: str = "deepseek-v4.1-flash"
     temperature: float = 0.2
-    timeout: float = 60.0
+    timeout: float = 120.0
     max_retries: int = 3
-    compact_threshold: int = 30000
+    compact_threshold: int = 60000
 
     @property
     def chat_url(self):
@@ -37,16 +37,16 @@ class Settings:
 
 def load_settings():
     _load_dotenv()
-    api_key = os.environ.get("ZHIPU_API_KEY")
+    api_key = os.environ.get("LLM_API_KEY")
     if not api_key:
-        raise RuntimeError("缺少 ZHIPU_API_KEY，请复制 .env.example 为 .env 并填入密钥")
+        raise RuntimeError("缺少 LLM_API_KEY，请复制 .env.example 为 .env 并填入密钥")
     return Settings(
         api_key=api_key,
-        base_url=os.environ.get("ZHIPU_BASE_URL", Settings.base_url),
-        model=os.environ.get("ZHIPU_MODEL", Settings.model),
-        temperature=float(os.environ.get("ZHIPU_TEMPERATURE", Settings.temperature)),
-        timeout=float(os.environ.get("ZHIPU_TIMEOUT", Settings.timeout)),
-        max_retries=int(os.environ.get("ZHIPU_MAX_RETRIES", Settings.max_retries)),
+        base_url=os.environ.get("LLM_BASE_URL", Settings.base_url),
+        model=os.environ.get("LLM_MODEL", Settings.model),
+        temperature=float(os.environ.get("LLM_TEMPERATURE", Settings.temperature)),
+        timeout=float(os.environ.get("LLM_TIMEOUT", Settings.timeout)),
+        max_retries=int(os.environ.get("LLM_MAX_RETRIES", Settings.max_retries)),
         compact_threshold=int(
             os.environ.get("LITAGENT_COMPACT_THRESHOLD", Settings.compact_threshold)
         ),

@@ -28,7 +28,7 @@ agentdemo/
   litagent/
     config.py                  # 模型、密钥、预算
     types.py                   # Message / ToolCall / ToolResult / AgentEvent
-    llm/                       # provider 适配（zhipu，后续可加 openai）
+    llm/                       # provider 适配（openai 兼容：DeepSeek / 中转站 / 智谱）
     agent/                     # loop.py, agent.py, context.py
     tools/                     # base.py, registry.py, arxiv.py, s2.py, pdf.py, notes.py
     prompt/                    # system.md, skills/*/SKILL.md
@@ -101,11 +101,66 @@ agentdemo/
 - **参考**：[agent-loop.test.ts](https://github.com/earendil-works/pi/blob/main/packages/agent/test/agent-loop.test.ts)、[packages/evals](https://github.com/earendil-works/pi/tree/main/packages/evals)、[packages/tui](https://github.com/earendil-works/pi/tree/main/packages/tui)、[telemetry.ts](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/src/core/telemetry.ts)。
 - **验收**：一条命令跑完评测，指标可比对。
 
+## 第二轮迭代：两模式 × 三档位（第 10–14 步）
+
+> 设计依据见 `DESIGN.md`。每步都保证仓库可运行、可回滚；入口默认行为除"Collect 下限从 5 提到 10"外保持不变。
+
+### 第 10 步｜工作流参数化（RunSpec + 档位表）
+
+- **实现**：
+  - 新建 `litagent/run_spec.py`：`RunSpec(mode, level, source, target_min, target_max, read_k, max_turns)`；`PRESETS` 六项（survey/deep × low/mid/high），数值取 `DESIGN.md` §2.2；`resolve(mode, level, survey_ids=None)` 校验组合并返回 spec。
+  - `workflow.py`：`run_workflow` 接受 `RunSpec`（保留传主题字符串的兼容路径，内部转为 `deep/low`）；`_run_stage` 的 `max_turns` 从 spec 取；`_validate_collect` 增加 `target_min` 参数，删除写死的 `MIN_COLLECT_PAPERS`。
+  - `main.py`：新增 `--mode {survey,deep}`、`--level {low,mid,high}`，默认 `deep/low`；与 `--workflow`、`--resume` 的组合规则写进 `--help`。
+  - 事件：`phase` 事件附带 `mode` / `level` / `target_min`，供 Web 与日志使用。
+- **参考**：现有 `workflow.py` 的 `_run_stage` / `RunResult`、`config.py` 的 env 解析写法；`DESIGN.md` §4.1–4.3。
+- **验收**：六种组合都能解析出正确 spec；`--mode deep --level low` 与改动前行为一致（下限 10 除外）；新增档位只改 `PRESETS`。
+
+### 第 11 步｜仅搜集模式（检索 + 逐级放宽 + 清单）
+
+- **实现**：
+  - `search_arxiv` 增加 `start` 分页参数；错误归一化为结构化 `{"error": ..., "retryable": bool}`，不再把裸异常文本交给模型。
+  - 新建 `litagent/search_ladder.py`：按 L0→L3 逐级放宽，返回 `(papers, provenance)`；每篇带 `query_level` / `matched_queries`；每级最多 3 条检索式；网络错误跳级而不终止。
+  - 新建 `litagent/survey.py`：`run_survey()` = Plan（简化提示词）→ 逐级检索 → Digest（代码归集、按 arXiv ID 去版本去重、相关度排序、摘要截断）→ 写 `surveys/<survey_id>/papers.jsonl` 与 `index.json`（topic / level / count / status / created_at）。
+  - 下限未达成：`status=partial` + `shortfall` 字段，不抛异常。
+  - 新建 `prompt/workflow/survey_plan.md`：只产出检索式，不做任何推断。
+- **参考**：`DESIGN.md` §2.3、§3；现有 `tools/arxiv.py` 的 `build_search_query` 与 `net.py` 的限速器。
+- **验收**：survey 三档各跑一次，篇数落在区间或 `partial` 且写明缺口；清单含 `query_level`；high 档 500 篇的模型调用次数与篇数无关；断网时产出 `partial` 不崩溃。
+
+### 第 12 步｜深度分层（候选集 + Select Top-K + 精读调度）
+
+- **实现**：
+  - 深度路径的 Collect 拆两段：先取"摘要级候选集"（复用第 11 步的检索与去重，不下载 PDF），再 `Select` 出 Top-K。
+  - 新建 `litagent/select.py`：默认规则打分（命中检索式数 + 年份 + 分类匹配），可选一次 LLM 批处理复核；输出有序 `arxiv_id` 列表，K 来自 spec。
+  - 精读调度：每篇论文独立 `messages`、独立 `run_loop`（只带本篇 PDF 与 `submit_evidence`），结束后只回传证据卡，全文不留在主上下文。
+  - `evidence.jsonl` 增加 `source`（`abstract` | `fulltext`）与 `read_round`；报告只允许引用 `fulltext` 证据。
+- **参考**：`DESIGN.md` §2.2、§7 成本风险；`pi-subagents` 的上下文隔离思路。
+- **验收**：deep 三档精读篇数 = 8 / 12 / 20；high 档记录单篇与整轮 token 并回写文档；主上下文不再累积全文。
+
+### 第 13 步｜清单导入
+
+- **实现**：
+  - `--from-survey sv_a sv_b`（1–3 个）：读 `index.json` 校验存在性与状态，合并各 `papers.jsonl` 并按 arXiv ID 去重。
+  - 导入模式跳过检索，`Plan` 仍执行（用于筛选与写作）；候选池不足 `target_min` 时直接 `partial`，不补检。
+  - 候选来源写入 `plan.json` 的 `candidate_source` 字段，便于审计。
+- **参考**：`DESIGN.md` §2.4。
+- **验收**：导入 1 份与 3 份均可跑完；候选池与清单并集的差集为空；检索调用次数为 0；不足下限时为 `partial`。
+
+### 第 14 步｜Web 集成与评测基线
+
+- **实现**：
+  - 新增 `GET /api/surveys`（返回 `survey_id` / 主题 / 档位 / 篇数 / 状态）；表单增加模式、档位、清单多选（限 1–3）。
+  - 阶段卡片按 `mode` 渲染不同阶段集合；`partial` 用独立样式并显示缺口。
+  - `eval/cases/` 放 3 个主题，跑六种组合，记录召回、引用真实率、证据覆盖率、token、耗时。
+- **参考**：`DESIGN.md` §5、§8；现有 `web/server.py` 的 Job / SSE 结构。
+- **验收**：Web 能触发六种组合；`partial` 可见；评测一条命令跑完并输出对比表。
+
 ## 执行顺序
 
-`1 → 2 → 3 → 5 → 6 → 4 → 7 → 8 → 9`
+`1 → 2 → 3 → 5 → 6 → 4 → 7 → 8 → 9 → 10 → 11 → 12 → 13 → 14`
 
 先把 loop 与文献工具跑通，治理、持久化和评测后补。每一步都应保持仓库可运行、可回滚。
+
+第二轮迭代里 `10 → 11` 是硬顺序：第 12、13 步都复用第 11 步的检索放宽与清单读写；`14` 可以在 12 之后并行推进。
 
 ## 参考资源
 

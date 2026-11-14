@@ -31,6 +31,8 @@ PLAN_TURNS = 2
 COLLECT_TURNS = 10
 SYNTHESIS_TURNS = 2
 
+MIN_COLLECT_PAPERS = 5
+
 EVIDENCE_REF = re.compile(r"\[e(\d+)\]")
 ARXIV_REF = re.compile(r"arXiv:\s*(\d{4}\.\d{4,5})(?:v\d+)?", re.IGNORECASE)
 DOI_REF = re.compile(r"10\.\d{4,}/[^\s，。；、）)\]]+")
@@ -92,6 +94,59 @@ def validate_citations(report, evidence):
             issues.append("引用了证据库之外的 DOI {}".format(found))
 
     return issues
+
+
+def _sub_question_covered(card_text, sub_id, question):
+    """证据卡的 sub_question 字段填子问题 id 或问题原文都算覆盖。"""
+    card_text = " ".join(str(card_text or "").split()).lower()
+    if not card_text:
+        return False
+    sub_id = str(sub_id or "").strip().lower()
+    if sub_id and sub_id in card_text:
+        return True
+    snippet = " ".join(str(question or "").split()).lower()[:12]
+    return bool(snippet) and snippet in card_text
+
+
+def _validate_collect(store, plan):
+    """Collect 阶段校验：论文数、子问题覆盖、证据总量都是硬约束。"""
+    if not store.evidence:
+        return ["还没有调用 submit_evidence"]
+
+    problems = []
+    papers = set(
+        _normalise_arxiv_id(record["arxiv_id"]) for record in store.evidence
+    ) - {""}
+    if len(papers) < MIN_COLLECT_PAPERS:
+        problems.append(
+            "证据库只覆盖 {} 篇论文，要求至少 {} 篇不同论文（按 arXiv 编号去重，"
+            "同一篇的多条证据只算一篇）".format(len(papers), MIN_COLLECT_PAPERS)
+        )
+
+    sub_questions = (plan or {}).get("sub_questions") or []
+    if sub_questions:
+        cards = [record.get("sub_question") for record in store.evidence]
+        uncovered = []
+        for sub in sub_questions:
+            sub_id = sub.get("id")
+            question = sub.get("question")
+            if not any(_sub_question_covered(card, sub_id, question) for card in cards):
+                uncovered.append(sub_id or question)
+        if uncovered:
+            problems.append(
+                "子问题 {} 没有任何证据卡，请补充对应证据（sub_question 填子问题 id）".format(
+                    "、".join(str(item) for item in uncovered)
+                )
+            )
+
+        floor = 2 * len(sub_questions)
+        if len(store.evidence) < floor:
+            problems.append(
+                "证据卡共 {} 条，要求至少 {} 条（每个子问题约 2 条起步，目标 10-16 条）".format(
+                    len(store.evidence), floor
+                )
+            )
+    return problems
 
 
 def _merge_usage(total, usage):
@@ -332,7 +387,7 @@ def run_workflow(client, registry, topic, on_event=None, on_phase=None, resume=F
             "collect",
             collect_prompt,
             "请按计划开始检索与精读，把证据写进证据库。",
-            lambda: [] if store.evidence else ["还没有调用 submit_evidence"],
+            lambda: _validate_collect(store, store.plan),
             COLLECT_TURNS,
             on_event,
             on_phase,

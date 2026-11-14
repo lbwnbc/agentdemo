@@ -1,4 +1,4 @@
-"""智谱（OpenAI 兼容协议）LLM 适配器。"""
+"""OpenAI 兼容协议适配器：DeepSeek 官方、中转站、智谱等均可用。"""
 from __future__ import annotations
 
 import time
@@ -11,8 +11,12 @@ from litagent.llm.base import LLMClient, LLMError, LLMResponse
 # 可重试的状态码：限流与服务端错误
 RETRY_STATUS = {429, 500, 502, 503, 504}
 
+# 回传模型时保留的字段。DeepSeek 系列会返回 reasoning_content，属于响应侧
+# 内容，原样回传会触发 400，因此统一做白名单过滤。
+ALLOWED_MESSAGE_KEYS = ("role", "content", "tool_calls", "name", "tool_call_id")
 
-class ZhipuClient(LLMClient):
+
+class OpenAICompatClient(LLMClient):
     def __init__(self, settings: Settings):
         self.settings = settings
 
@@ -27,7 +31,7 @@ class ZhipuClient(LLMClient):
             payload["tool_choice"] = "auto"
 
         headers = {
-            "Authorization": self.settings.api_key,
+            "Authorization": "Bearer {}".format(self.settings.api_key),
             "Content-Type": "application/json",
         }
 
@@ -65,6 +69,8 @@ class ZhipuClient(LLMClient):
             message = data["choices"][0]["message"]
         except (KeyError, IndexError) as exc:
             raise LLMError("响应格式异常: {}".format(data)) from exc
+        message = {k: v for k, v in message.items() if k in ALLOWED_MESSAGE_KEYS}
+        message.setdefault("role", "assistant")
         return LLMResponse(
             message=message,
             usage=data.get("usage") or {},

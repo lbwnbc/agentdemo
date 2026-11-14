@@ -44,10 +44,10 @@
 ```text
 main.py                       CLI 入口：prompt / --resume / --export，串起 loop + session + compaction
 litagent/
-  config.py                   Settings：.env + 环境变量（ZHIPU_* / LITAGENT_*）
+  config.py                   Settings：.env + 环境变量（LLM_* / LITAGENT_*）
   types.py                    ToolCall / ToolResult / ToolError，AgentEvent 枚举与 Event
   llm/base.py                 LLMResponse、LLMClient 抽象
-  llm/zhipu.py                ZhipuClient：超时、429/5xx 退避重试、响应校验
+  llm/openai_compat.py        OpenAICompatClient：Bearer 鉴权、超时、429/5xx 退避重试、响应字段白名单
   agent/loop.py               run_loop / run_loop_continue、终止条件、并行工具、压缩钩子
   compaction.py               按用户轮次切分 + 摘要历史（保留工具配对）
   session.py                  JSONL 记录、历史恢复、Markdown 导出、reset
@@ -106,14 +106,14 @@ $env:LITAGENT_COMPACT_THRESHOLD=3000
 python main.py --workflow "LLM agent memory 的研究现状"
 
 # 6) 阶段失败后接着跑（跳过已落盘的 plan/evidence/outline）
-$env:ZHIPU_TIMEOUT=300   # 报告这类长输出容易撞默认 60s 超时
+$env:LLM_TIMEOUT=300   # 报告这类长输出容易撞默认超时
 python main.py --workflow --resume "同一主题"
 
 # 7) 本地 Web 交互界面（浏览器打开 http://127.0.0.1:8000）
 python main.py --web --port 8000
 ```
 
-可用环境变量：`ZHIPU_API_KEY`、`ZHIPU_BASE_URL`、`ZHIPU_MODEL`、`ZHIPU_TEMPERATURE`、`ZHIPU_TIMEOUT`、`ZHIPU_MAX_RETRIES`、`LITAGENT_COMPACT_THRESHOLD`、`LITAGENT_WORKSPACE`、`LITAGENT_SESSION`。
+可用环境变量：`LLM_API_KEY`、`LLM_BASE_URL`、`LLM_MODEL`、`LLM_TEMPERATURE`、`LLM_TIMEOUT`、`LLM_MAX_RETRIES`、`LITAGENT_COMPACT_THRESHOLD`、`LITAGENT_WORKSPACE`、`LITAGENT_SESSION`。
 
 ## 七、已验证内容
 
@@ -132,7 +132,7 @@ python main.py --web --port 8000
 ## 八、已知限制与坑
 
 1. **GitHub 推送时好时坏**：2026-11-05 上午 TCP 可达但 TLS 握手失败（curl 退出码 35），同日下午已恢复正常推送。若再遇到 `Failed to connect to github.com port 443`，先 `git push` 重试，别急着查凭据。
-2. **长输出阶段容易超时**：report 一次要生成 7K+ completion tokens，默认 `ZHIPU_TIMEOUT=60` 会撞 read timeout。跑 `--workflow` 前建议设 `ZHIPU_TIMEOUT=300`。
+2. **长输出阶段容易超时**：report 一次要生成 7K+ completion tokens，默认 `LLM_TIMEOUT=120` 仍可能撞 read timeout。跑 `--workflow` 前建议设 `LLM_TIMEOUT=300`。
 3. **PDF 下载恢复但不算稳定**：此前 `arxiv.org/pdf` 超时，2026-11-05 实测 7 篇全部下载成功。失败时 collect 提示词允许降级为摘要级证据（`kind=background`）。
 4. **GitHub 仓库是 public**，旧 key 已禁用更换；新 key 只在本地 `.env`。
 5. **缺少提交到仓库的自动化测试**：目前的验证脚本是临时的（写在 `%TEMP%`），删掉即失。第 9 步应把 golden set 与工具测试固化到 `tests/`。
@@ -142,7 +142,7 @@ python main.py --web --port 8000
 9. **工作流没有接入 session/compaction**：四个阶段各自独立统计用量，`--workflow` 不写 `session.jsonl`，也不能 `--export`；另外 `--workflow` 新跑会覆盖上一轮的四个产物文件。
 10. **collect 阶段成本高**：真实跑满 10 轮用了 23.5 万 tokens，因为每轮都携带检索摘要与 PDF 正文。后续可考虑按论文拆子代理、或把已读页压缩成证据再丢弃原文。
 11. **Web 端是单任务串行**：`JobManager` 同时只允许一个工作流，因为 `LITAGENT_SESSION` 是进程级环境变量，并发跑不同会话会互相串目录；页面刷新后靠内存中的 job 回放事件，服务重启则历史任务不可再查（产物仍在磁盘，可切会话读取）。
-12. **Web 端默认放宽读超时**：`serve()` 用 `setdefault("ZHIPU_TIMEOUT", "300")`，避免报告阶段撞 60s；`.env` 显式设置可覆盖。
+12. **Web 端默认放宽读超时**：`serve()` 用 `setdefault("LLM_TIMEOUT", "300")`，避免报告阶段撞默认超时；`.env` 显式设置可覆盖。
 13. **代理环境变量会让 LLM 调用瞬间失败**：2026-11-07 某次 Web 实例继承了不可用的代理配置，collect 的第一次 LLM 调用就 `ProxyError`（重试 3 次后 `LLMError`），任务随即结束。同一台机器新开进程 `requests.utils.getproxies()` 为空、直连 `open.bigmodel.cn` 返回 200。处理办法：在干净 shell 重启服务；必要时清理 `HTTP_PROXY` / `HTTPS_PROXY` / `ALL_PROXY`。
 14. **`resume` 会复用旧 `plan.json`**：改了主题或 `plan.md` 之后，必须取消「复用已落盘产物」或删除 `workspace/<session>/workflow/plan.json`，否则规划阶段直接跳过，旧边界会一直沿用。
 15. **界面状态 ≠ 任务存活**：服务重启会丢掉内存里的 job，旧任务的产物仍在磁盘；排查时先看 `GET /api/status` 的 `done/error/stages`，不要只看阶段卡片。

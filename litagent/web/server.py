@@ -21,7 +21,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 from litagent.config import PROJECT_ROOT, _load_dotenv, load_settings
-from litagent.llm.zhipu import ZhipuClient
+from litagent.llm.openai_compat import OpenAICompatClient
 from litagent.tools import build_default_registry
 from litagent.types import AgentEvent
 from litagent.workflow import WorkflowError, run_workflow
@@ -315,7 +315,7 @@ class JobManager:
 
         try:
             settings = load_settings()
-            client = ZhipuClient(settings)
+            client = OpenAICompatClient(settings)
             result = run_workflow(
                 client,
                 build_default_registry(),
@@ -554,7 +554,7 @@ def serve(host="127.0.0.1", port=8000):
     _load_dotenv()
     os.environ.setdefault("LITAGENT_WORKSPACE", str(PROJECT_ROOT / "workspace"))
     # 报告阶段输出长，读超时默认放宽到 300 秒（.env 里显式设置可覆盖）
-    os.environ.setdefault("ZHIPU_TIMEOUT", "300")
+    os.environ.setdefault("LLM_TIMEOUT", "300")
 
     server = LitAgentServer((host, port))
     print("LitAgent Web 已启动: http://{}:{}".format(host, port))

@@ -4,7 +4,7 @@ import argparse
 from litagent.agent import run_loop
 from litagent.compaction import compact_messages
 from litagent.config import load_settings
-from litagent.llm.zhipu import ZhipuClient
+from litagent.llm.openai_compat import OpenAICompatClient
 from litagent.prompt import load_system_prompt
 from litagent.session import (
     append_message,
@@ -82,7 +82,7 @@ def print_phase(name, status, info):
 
 def run_workflow_mode(topic, resume=False):
     settings = load_settings()
-    client = ZhipuClient(settings)
+    client = OpenAICompatClient(settings)
     try:
         result = run_workflow(
             client,
@@ -136,7 +136,7 @@ def main():
         return
 
     settings = load_settings()
-    client = ZhipuClient(settings)
+    client = OpenAICompatClient(settings)
     registry = build_default_registry()
 
     if args.resume:
