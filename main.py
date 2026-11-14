@@ -1,5 +1,7 @@
 """命令行入口：Agent Loop + 会话持久化；--workflow 走三阶段调研。"""
 import argparse
+import json
+from pathlib import Path
 
 from litagent.agent import run_loop
 from litagent.compaction import compact_messages
@@ -65,6 +67,12 @@ def record_event(event):
 def print_phase(name, status, info):
     if status == "start":
         print("[{}] start".format(name))
+    elif status == "done" and "count" in info:
+        print(
+            "[{}] done: {} 篇（最宽级别 {}）".format(
+                name, info["count"], info.get("max_level") or "-"
+            )
+        )
     elif status == "done":
         print(
             "[{}] done: {} steps, {} tokens".format(
@@ -102,13 +110,51 @@ def run_workflow_mode(topic, resume=False, mode="deep", level="low"):
         raise SystemExit("工作流失败: {}".format(exc))
 
     print()
-    print(result.report)
+    if result.survey:
+        print_survey(result)
+    else:
+        print(result.report)
     print()
     for name, path in result.paths.items():
         print("{}: {}".format(name, path))
     print("总 tokens: {}".format(result.usage.get("total_tokens", 0)))
     if result.issues:
         print("注意：引用自检未通过，问题已写入 report.md 末尾")
+
+
+def print_survey(result):
+    """仅搜集模式打印清单表：编号 / 年份 / arXiv / 标题。"""
+    survey = result.survey
+    print(
+        "清单 {}：{} 篇，状态 {}，最宽级别 {}".format(
+            survey["survey_id"],
+            survey["count"],
+            survey["status"],
+            survey.get("max_level") or "-",
+        )
+    )
+    if survey.get("shortfall"):
+        print("缺口：还差 {} 篇到档位下限 {}".format(survey["shortfall"], result.target_min))
+    path = Path(result.paths.get("papers", ""))
+    if not path.exists():
+        return
+    papers = [
+        json.loads(line)
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    print("{:>4}  {:<4}  {:<14}  {}".format("#", "年份", "arXiv", "标题"))
+    for paper in papers[:20]:
+        print(
+            "{:>4}  {:<4}  {:<14}  {}".format(
+                paper.get("rank", ""),
+                paper.get("year") or "-",
+                paper.get("arxiv_id", ""),
+                paper.get("title", ""),
+            )
+        )
+    if len(papers) > 20:
+        print("…其余 {} 篇见清单文件".format(len(papers) - 20))
 
 
 def main():

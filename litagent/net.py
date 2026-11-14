@@ -14,7 +14,14 @@ import requests
 
 
 class HttpError(Exception):
-    """请求失败：网络异常、重试耗尽或非 2xx 响应。"""
+    """请求失败：网络异常、重试耗尽或非 2xx 响应。
+
+    retryable=False 表示重试也无用（如 4xx 或响应格式错误），调用方应换策略而不是重试。
+    """
+
+    def __init__(self, message, retryable=True):
+        super().__init__(message)
+        self.retryable = retryable
 
 
 class RateLimiter:
@@ -112,7 +119,9 @@ class HttpClient:
                         try:
                             value = response.json()
                         except ValueError:
-                            raise HttpError("响应不是合法 JSON: {}".format(url))
+                            raise HttpError(
+                                "响应不是合法 JSON: {}".format(url), retryable=False
+                            )
                     else:
                         value = response.text
                     if self.cache is not None:
@@ -122,7 +131,8 @@ class HttpClient:
                     last_error = HttpError("HTTP {}".format(response.status_code))
                 else:
                     raise HttpError(
-                        "HTTP {}: {}".format(response.status_code, response.text[:200])
+                        "HTTP {}: {}".format(response.status_code, response.text[:200]),
+                        retryable=False,
                     )
             if attempt < self.retries:
                 time.sleep(self.backoff * (2 ** attempt))

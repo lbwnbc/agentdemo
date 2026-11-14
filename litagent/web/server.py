@@ -338,6 +338,7 @@ class JobManager:
                 "target_max": result.target_max,
                 "read_k": result.read_k,
                 "plan": result.plan,
+                "survey": result.survey,
                 "evidence": result.evidence,
                 "outline": result.outline,
                 "report": result.report,

@@ -56,6 +56,7 @@ class WorkflowResult:
     usage: dict = field(default_factory=dict)
     paths: dict = field(default_factory=dict)
     stages: list = field(default_factory=list)
+    survey: dict = None
 
 
 def workflow_dir():
@@ -348,7 +349,9 @@ def run_workflow(client, registry, spec, on_event=None, on_phase=None, resume=Fa
     if not isinstance(spec, RunSpec):
         spec = resolve(spec)
     if spec.mode == "survey":
-        raise ValueError("survey 模式尚未实现（第 11 步）")
+        from litagent.survey import run_survey
+
+        return run_survey(client, registry, spec, on_event=on_event, on_phase=on_phase)
     on_phase = _phase_with_meta(on_phase, spec)
 
     topic = spec.topic
