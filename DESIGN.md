@@ -191,9 +191,9 @@ flowchart TD
 | 引用结构校验 | `validate_citations` + 首次失败重写、二次失败 `degraded` 保留报告 | 已实现 |
 | Collect 下限校验 | 论文数去重 + 子问题覆盖 + 总量下限，不达标走阶段重试 | 已实现（下限由档位 `target_min` 驱动） |
 | 零依赖本地 Web | 标准库 HTTP + SSE + 自包含单页，无框架无构建 | 已实现 |
-| **两模式 × 三档位契约** | survey / deep × low/mid/high，档位绑定目标篇数、阶段预算、精读上限 | 已实现（M1：`run_spec.py`，survey 流程待第 11 步） |
-| **逐级放宽兜底** | L0 原式 → L1 拆 AND → L2 同义词 → L3 分类浏览，记录 `query_level`，用尽标 `partial` | 计划（M2） |
-| **清单作为一等公民** | `surveys/{id}/papers.jsonl` + `index.json` 注册表，清单由代码归集不逐条过模型 | 计划（M2） |
+| **两模式 × 三档位契约** | survey / deep × low/mid/high，档位绑定目标篇数、阶段预算、精读上限 | 已实现（M1：`run_spec.py`） |
+| **逐级放宽兜底** | L0 原式 → L1 拆 AND → L2 同义词 → L3 分类浏览，记录 `query_level`，用尽标 `partial` | 已实现（M2：`search_ladder.py`） |
+| **清单作为一等公民** | `surveys/{id}/papers.jsonl` + `index.json` 注册表，清单由代码归集不逐条过模型 | 已实现（M2：`survey.py`） |
 | **清单导入** | 深度调研按 `survey_id` 导入 1–3 份，候选池严格限定、不自动补检 | 计划（M3） |
 | **Top-K 分层精读** | 全部读摘要进候选，仅 K 篇（8/12/20）读全文并产证据 | 计划（M3） |
 

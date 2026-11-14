@@ -12,9 +12,9 @@
 
 ## 二、当前状态（一句话）
 
-框架层第 1–8 步已完成并真实跑通：检索 arXiv → 精读 PDF → 记录证据笔记 → 带引用综合 → 会话持久化/续聊 → 超阈值上下文压缩 → 三阶段工作流编排。第 9 步的“交互”部分已先落地：本地零依赖 Web 界面（`python main.py --web`）。第二轮迭代按 `DESIGN.md` 推进，第 10 步「工作流参数化」已完成（`RunSpec` + 六档预设 + 档位驱动的 Collect 校验），第 11 步「仅搜集模式」尚未实现。剩余第 9 步的评测（golden set / 指标 / tests），以及被推迟的 Skills。
+框架层第 1–8 步已完成并真实跑通：检索 arXiv → 精读 PDF → 记录证据笔记 → 带引用综合 → 会话持久化/续聊 → 超阈值上下文压缩 → 三阶段工作流编排。第 9 步的“交互”部分已先落地：本地零依赖 Web 界面（`python main.py --web`）。第二轮迭代按 `DESIGN.md` 推进：第 10 步「工作流参数化」（`RunSpec` + 六档预设）与第 11 步「仅搜集模式」（`--mode survey`：检索式规划 → L0–L3 逐级放宽 → 清单落盘）已完成。剩余第 9 步的评测（golden set / 指标 / tests），以及被推迟的 Skills。
 
-**当前本机运行时状态（2026-11-14）**：8000 端口有一个 Web 实例在跑（`python main.py --web --port 8000`），空闲。LLM 已从智谱切到 OpenAI 兼容中转站（`LLM_*` 环境变量，默认 `deepseek-v4.1-flash`），密钥只在本机 `.env`。工作区里 `wf-real` 是完整四件套（4 子问题 / 12 证据 / 报告），`new` 只有 `plan.json`。
+**当前本机运行时状态（2026-11-14）**：8000 端口有一个 Web 实例在跑（`python main.py --web --port 8000`），空闲。LLM 已从智谱切到 OpenAI 兼容中转站（`LLM_*` 环境变量，默认 `deepseek-v4.1-flash`），密钥只在本机 `.env`。工作区里 `wf-real` 是完整四件套（4 子问题 / 12 证据 / 报告），`new` 只有 `plan.json`，`survey-real` 有一份 13 篇的真实清单。
 
 ## 三、提交记录
 
@@ -39,6 +39,7 @@
 | `de1a8eb` | 交接文档更新到 2026-11-07，系统提示词遵循用户时间范围 |
 | `acb6441` | LLM 适配层改为 OpenAI 兼容协议；补 collect 覆盖校验；新增 `DESIGN.md` 与第 10–14 步计划 |
 | `b19ffe5` | 第 10 步：工作流参数化（`RunSpec` + 六档预设 + 档位驱动校验） |
+| `1d959fb` | 第 11 步：仅搜集模式（检索式规划 + L0–L3 逐级放宽 + 清单落盘） |
 
 **当前已全部推送到 GitHub**（`origin/main` 与本地一致）。旧智谱 key 已在后台禁用并更换，新 key 只存在本地 `.env`（已 gitignore）。
 
@@ -56,9 +57,11 @@ litagent/
   session.py                  JSONL 记录、历史恢复、Markdown 导出、reset
   workflow.py                 三阶段编排：阶段重试/resume、产物落盘、引用校验
   run_spec.py                 RunSpec + 六档 PRESETS（survey/deep × low/mid/high）+ resolve()
+  search_ladder.py            L0–L3 逐级放宽、arXiv 去重、分页取数、provenance（纯代码）
+  survey.py                   仅搜集流程：survey_plan → 检索 → Digest → papers.jsonl + index.json
   prompt/system.md            调研 SOP、引用规则、输出格式
   prompt/__init__.py          load_system_prompt() / load_workflow_prompt()
-  prompt/workflow/*.md        plan / collect / outline / report 四份阶段提示词
+  prompt/workflow/*.md        plan / collect / outline / report / survey_plan 阶段提示词
   net.py                      RateLimiter / DiskCache / HttpClient（get_text、get_json）
   workspace.py                workspace/<session>/ 约定，LITAGENT_WORKSPACE / LITAGENT_SESSION
   tools/base.py               Tool 协议、JSON Schema 校验、异常归一化、文本截断
@@ -111,7 +114,8 @@ python main.py --workflow "LLM agent memory 的研究现状"
 
 # 5b) 指定模式与档位（默认 deep/low；档位决定目标篇数与 Collect 轮数）
 python main.py --workflow --mode deep --level mid "LLM agent memory 的研究现状"
-#    survey 模式已预留参数解析，但流程要到第 11 步才实现，当前会明确报错
+#    仅搜集：只规划检索式，篇数/去重/排序全由代码完成，产物在 workspace/<session>/surveys/
+python main.py --workflow --mode survey --level low "2026年智能体记忆机制前沿进展"
 
 # 6) 阶段失败后接着跑（跳过已落盘的 plan/evidence/outline）
 $env:LLM_TIMEOUT=300   # 报告这类长输出容易撞默认超时
@@ -137,6 +141,7 @@ python main.py --web --port 8000
 - **失败态修复（2026-11-07）**：用错误 key 起 8124 测试实例，SSE 事件为 `plan start → agent_start → turn → phase plan failed → error → finished(ok=false)`；浏览器实测「规划」卡片标红、提示 401，其余阶段保持等待，控制台零报错。旧行为只会发 `error`/`finished`，卡片永远停在「进行中」。
 - **年份约束修复（2026-11-07）**：真实复现「2026 年智能体记忆机制前沿进展」被规划成 `arXiv 2024–2026`；定位为 `plan.md` 只要求写时间范围、`system.md` 又有「优先近 2-3 年」偏好，模型据此自行放宽。已在 `plan.md` 增加「明确年份必须原样沿用」规则；**尚未复跑真实主题验证**，下次运行 plan 时要检查 `topic_boundary` 是否还与主题年份一致。
 - **第 10 步（2026-11-14）**：离线验证 17 项——六种组合的 `target_min/target_max/read_k/max_turns` 全部符合 `DESIGN.md` §2.2、非法组合与空主题报错、`survey` 拒绝清单导入、`_validate_collect` 在 `target_min=5/10` 下行为正确、`run_workflow` 传字符串等价 `deep/low`、phase 事件带 `mode/level/target_min`、`survey` 模式明确报「第 11 步」；真实 `--workflow --resume --mode deep --level low` 只跑 report（9,790 tokens），档位日志与 resume 行为正常。Web 侧 `POST /api/run` 的 `mode/level` 透传与非法组合 400 也已验证。
+- **第 11 步（2026-11-14）**：离线 33 项——L0–L3 检索式展开（每级 ≤3 条）、版本号去重且保留首次命中级别、分页取到 `target_max` 上限、全级断网不抛异常而是 `partial` + `shortfall`、`run_survey` 端到端写出 `papers.jsonl`/`index.json` 且字段齐全、模型只参与 Plan。真实跑 `--mode survey --level low`「2026年智能体记忆机制前沿进展」：plan 5 个子问题，L0 三条检索式中两条超时、一条返回 13 篇即达到下限 10 篇（状态 `done`，全程 2,205 tokens），验证了「单条检索失败不终止、够数即停」。
 
 ## 八、已知限制与坑
 
@@ -155,11 +160,13 @@ python main.py --web --port 8000
 13. **代理环境变量会让 LLM 调用瞬间失败**：2026-11-07 某次 Web 实例继承了不可用的代理配置，collect 的第一次 LLM 调用就 `ProxyError`（重试 3 次后 `LLMError`），任务随即结束。同一台机器新开进程 `requests.utils.getproxies()` 为空、直连 `open.bigmodel.cn` 返回 200。处理办法：在干净 shell 重启服务；必要时清理 `HTTP_PROXY` / `HTTPS_PROXY` / `ALL_PROXY`。
 14. **`resume` 会复用旧 `plan.json`**：改了主题或 `plan.md` 之后，必须取消「复用已落盘产物」或删除 `workspace/<session>/workflow/plan.json`，否则规划阶段直接跳过，旧边界会一直沿用。
 15. **界面状态 ≠ 任务存活**：服务重启会丢掉内存里的 job，旧任务的产物仍在磁盘；排查时先看 `GET /api/status` 的 `done/error/stages`，不要只看阶段卡片。
+16. **survey 的检索质量取决于 arXiv 可用性**：真实一次 L0 三条检索式中两条超时，属于限速/网络抖动。当前策略是记录错误后继续，篇数够 `target_min` 仍算 `done`，否则 `partial` 并在阶段信息/CLI 里显示缺口；失败原因保留在 `surveys/index.json` 的 `errors`。
+17. **survey 目前忽略 `--resume`**：清单是只读快照，重跑会生成新的 `survey_id` 目录；要复用旧清单等第 13 步的清单导入。
 
 ## 九、下一步（按建议顺序）
 
-1. **第 11 步：仅搜集模式**（`ROADMAP.md` + `DESIGN.md` §2.3/§3）。`search_arxiv` 加分页与结构化错误 → `search_ladder.py` 做 L0–L3 逐级放宽 → `survey.py` 归集 `papers.jsonl` + `index.json` → `survey_plan.md` 只产出检索式。验收见 ROADMAP 第 11 步与 DESIGN G2/G4；`RunSpec` 与 `--mode survey` 的入口已就绪，把 `run_workflow` 的 `survey` 未实现分支替换掉即可。
-2. **第 12 步：深度分层**（候选集 + Select Top-K + 精读调度），再按第 13 步做清单导入、第 14 步做 Web 集成与评测基线。
+1. **第 12 步：深度分层**（`ROADMAP.md` + `DESIGN.md` §2.4/§4.3）。候选集（`candidates.jsonl`，全部只读摘要）→ Select 读摘要选 Top-K（K=8/12/20）→ 精读调度按 K 产证据卡；`RunSpec.read_k` 已就位，`_validate_collect` 的论文数下限仍按 `target_min`。
+2. **第 13 步：清单导入** + **第 14 步：Web 集成与评测基线**（档位/进度/成本展示、清单阅读与导出）。
 3. **Skills（原第 6 步后半）**。`litagent/prompt/skills/*/SKILL.md` + `load_skill` 工具做渐进式披露：主提示词只放索引，按需加载全文。参考 pi 的 `skills.ts`、`resource-loader.ts`。验收：开/关 skills 的产出可对比，引用格式统一。
 4. **第 9 步：评测**。golden set（10 个主题 + 期望覆盖的关键工作）、指标（候选召回 / 引用真实率 / 证据覆盖率 / 工具失败率 / 成本），把 `%TEMP%` 里的验证脚本固化进 `tests/`；Web 界面已提供阶段进度、实时事件流与产物阅读，可直接复用其事件数据做展示层回归。
 5. **增强检索**：Semantic Scholar 引文滚雪球（注意限速，建议申请 key）、跨会话文献库、去重。
