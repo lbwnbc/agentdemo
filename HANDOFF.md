@@ -196,6 +196,7 @@ python main.py --eval --eval-cases agent-memory --eval-combos survey/low,deep/lo
 23. **Web 前端是单文件内联脚本**：一处引号不匹配就会让整页 JS 失效（第 14 步真遇到一次），页面只剩静态骨架。改完 `index.html` 务必用浏览器控制台做一次冒烟，别只看 `py_compile` 通过。
 24. **`--eval` 默认 18 次真实运行**：deep/mid/high 成本很高。先用 `--eval-cases` / `--eval-combos` 缩小范围；结果按时间戳落盘，不会互相覆盖。单个组合失败会记 `status=error` 并继续跑完矩阵。
 25. **`/api/surveys` 只读当前会话**：清单按会话隔离，跨会话找清单要先切会话；`partial` 的缺口来自清单篇数与档位 `target_min` 的差，不代表还有“补检”这一步。
+26. **只有 survey 产物的会话不能只看 `/api/artifacts`**：评测矩阵会话（`eval-<case>-<mode>-<level>`）只有 `surveys/`、没有 `workflow/`，`/api/artifacts` 会返回 `result: null`。前端选会话后要回退到 `state.surveys[0]` 并自动打开清单详情；会话下拉的「清单 N」由 `/api/sessions` 的 `surveys` 字段提供。
 
 ## 九、下一步（按建议顺序）
 

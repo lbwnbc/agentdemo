@@ -142,6 +142,10 @@ def list_sessions():
             count = sum(
                 1 for line in evidence.read_text(encoding="utf-8").splitlines() if line.strip()
             )
+        surveys = [
+            item for item in read_index(path / "surveys").get("surveys") or []
+            if item.get("survey_id")
+        ]
         items.append(
             {
                 "name": path.name,
@@ -149,6 +153,10 @@ def list_sessions():
                 "outline": (base / "outline.md").exists(),
                 "report": report.exists(),
                 "evidence": count,
+                "surveys": len(surveys),
+                "survey_papers": sum(
+                    int(item.get("count") or 0) for item in surveys
+                ),
                 "mtime": report.stat().st_mtime if report.exists() else path.stat().st_mtime,
             }
         )

@@ -1442,18 +1442,34 @@
     updatePresetHint();
     state.surveyId = "";
     resetPhases("deep");
-    refreshSurveys(session);
-    api("/api/artifacts?session=" + encodeURIComponent(session)).then(function (res) {
-      if (!res.ok) return;
-      if (res.result) {
-        renderResult(res.result);
-        state.result = res.result;
-        showTab("report");
-        setHint("已加载会话 " + session + " 的历史产物。");
-      } else {
+    refreshSurveys(session).then(function () {
+      api("/api/artifacts?session=" + encodeURIComponent(session)).then(function (res) {
+        if (!res.ok) return;
+        if (res.result) {
+          renderResult(res.result);
+          state.result = res.result;
+          showTab("report");
+          setHint("已加载会话 " + session + " 的历史产物。");
+          return;
+        }
+        if (state.surveys.length) {
+          // 只有 survey 产物的会话（评测矩阵/仅搜集）：直接展示最新清单。
+          state.mode = "survey";
+          modeSelect.value = "survey";
+          updatePresetHint();
+          renderIdle();
+          var latest = state.surveys[0];
+          state.liveCandidates = latest.count;
+          el("stat-candidates").textContent = fmt(latest.count);
+          setPhase("plan", "done", { fromDisk: true });
+          setPhase("collect", "done", { fromDisk: true, count: latest.count });
+          showSurveyDetail(latest.survey_id);
+          setHint("会话 " + session + " 只有仅搜集清单，已打开最新一份。");
+          return;
+        }
         renderIdle();
         setHint("会话 " + session + " 还没有产物，填写主题后即可开始调研。");
-      }
+      });
     });
   }
 
@@ -1463,7 +1479,8 @@
       sessionList.innerHTML = '<option value="">历史…</option>';
       (res.sessions || []).forEach(function (item) {
         var label = item.name + (item.evidence ? " · " + item.evidence + " 证据" : "") +
-          (item.report ? " · 报告" : "");
+          (item.report ? " · 报告" : "") +
+          (item.surveys ? " · " + item.surveys + " 清单" : "");
         var option = document.createElement("option");
         option.value = item.name;
         option.textContent = label;
