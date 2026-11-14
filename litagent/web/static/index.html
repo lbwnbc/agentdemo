@@ -1075,6 +1075,7 @@
     if (result.mode && MODE_PHASES[result.mode] && !state.running) {
       state.mode = result.mode;
       modeSelect.value = result.mode;
+      updatePresetHint();
       var expected = MODE_PHASES[state.mode].join(",");
       if (Object.keys(phaseCards).join(",") !== expected) buildPhases(state.mode);
       renderSurveyPicker();
@@ -1438,6 +1439,7 @@
     state.session = session;
     state.mode = "deep";
     modeSelect.value = "deep";
+    updatePresetHint();
     state.surveyId = "";
     resetPhases("deep");
     refreshSurveys(session);
