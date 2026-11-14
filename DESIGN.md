@@ -195,7 +195,7 @@ flowchart TD
 | **逐级放宽兜底** | L0 原式 → L1 拆 AND → L2 同义词 → L3 分类浏览，记录 `query_level`，用尽标 `partial` | 已实现（M2：`search_ladder.py`） |
 | **清单作为一等公民** | `surveys/{id}/papers.jsonl` + `index.json` 注册表，清单由代码归集不逐条过模型 | 已实现（M2：`survey.py`） |
 | **清单导入** | 深度调研按 `survey_id` 导入 1–3 份，候选池严格限定、不自动补检 | 计划（M3） |
-| **Top-K 分层精读** | 全部读摘要进候选，仅 K 篇（8/12/20）读全文并产证据 | 计划（M3） |
+| **Top-K 分层精读** | 全部读摘要进候选，仅 K 篇（8/12/20）读全文并产证据 | 已实现（M3：`select.py` + `deep_read.py`，证据分 `fulltext`/`abstract`） |
 
 #### C. 已经实现的（现状盘点，可直接复用）
 
