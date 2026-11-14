@@ -1,6 +1,6 @@
 # 交接文档：文献调研智能体（agentdemo）
 
-> 用途：在上下文切换 / 换人接手时快速恢复项目状态。最后更新于 2026-11-07（第 8 步 + Web 界面 + 失败态与年份约束修复）。
+> 用途：在上下文切换 / 换人接手时快速恢复项目状态。最后更新于 2026-11-14（第 10 步：工作流参数化）。
 
 ## 一、项目目标
 
@@ -12,9 +12,9 @@
 
 ## 二、当前状态（一句话）
 
-框架层第 1–8 步已完成并真实跑通：检索 arXiv → 精读 PDF → 记录证据笔记 → 带引用综合 → 会话持久化/续聊 → 超阈值上下文压缩 → 三阶段工作流编排。第 9 步的“交互”部分已先落地：本地零依赖 Web 界面（`python main.py --web`）。近期又修了两个真实问题：任务异常时界面不再停在「进行中」；规划提示词强制沿用主题中的明确年份。剩余第 9 步的评测（golden set / 指标 / tests），以及被推迟的 Skills。
+框架层第 1–8 步已完成并真实跑通：检索 arXiv → 精读 PDF → 记录证据笔记 → 带引用综合 → 会话持久化/续聊 → 超阈值上下文压缩 → 三阶段工作流编排。第 9 步的“交互”部分已先落地：本地零依赖 Web 界面（`python main.py --web`）。第二轮迭代按 `DESIGN.md` 推进，第 10 步「工作流参数化」已完成（`RunSpec` + 六档预设 + 档位驱动的 Collect 校验），第 11 步「仅搜集模式」尚未实现。剩余第 9 步的评测（golden set / 指标 / tests），以及被推迟的 Skills。
 
-**当前本机运行时状态（2026-11-07）**：8123 端口有一个 Web 实例在跑（`python main.py --web --port 8123`），空闲、无历史 job（服务重启会清空内存里的 job）。工作区里 `wf-real` 是完整四件套（4 子问题 / 12 证据 / 报告），`new` 只有 `plan.json`（collect 因代理不可达在第一次 LLM 调用就失败）。
+**当前本机运行时状态（2026-11-14）**：8000 端口有一个 Web 实例在跑（`python main.py --web --port 8000`），空闲。LLM 已从智谱切到 OpenAI 兼容中转站（`LLM_*` 环境变量，默认 `deepseek-v4.1-flash`），密钥只在本机 `.env`。工作区里 `wf-real` 是完整四件套（4 子问题 / 12 证据 / 报告），`new` 只有 `plan.json`。
 
 ## 三、提交记录
 
@@ -36,6 +36,9 @@
 | `8c3ed87` | 交接文档补充 Web 界面提交记录 |
 | `b9ab4e6` | 修复：工作流异常时标记失败阶段，避免界面停在「进行中」 |
 | `c050180` | 修复：规划阶段强制沿用主题中的年份范围 |
+| `de1a8eb` | 交接文档更新到 2026-11-07，系统提示词遵循用户时间范围 |
+| `acb6441` | LLM 适配层改为 OpenAI 兼容协议；补 collect 覆盖校验；新增 `DESIGN.md` 与第 10–14 步计划 |
+| `b19ffe5` | 第 10 步：工作流参数化（`RunSpec` + 六档预设 + 档位驱动校验） |
 
 **当前已全部推送到 GitHub**（`origin/main` 与本地一致）。旧智谱 key 已在后台禁用并更换，新 key 只存在本地 `.env`（已 gitignore）。
 
@@ -52,6 +55,7 @@ litagent/
   compaction.py               按用户轮次切分 + 摘要历史（保留工具配对）
   session.py                  JSONL 记录、历史恢复、Markdown 导出、reset
   workflow.py                 三阶段编排：阶段重试/resume、产物落盘、引用校验
+  run_spec.py                 RunSpec + 六档 PRESETS（survey/deep × low/mid/high）+ resolve()
   prompt/system.md            调研 SOP、引用规则、输出格式
   prompt/__init__.py          load_system_prompt() / load_workflow_prompt()
   prompt/workflow/*.md        plan / collect / outline / report 四份阶段提示词
@@ -105,6 +109,10 @@ $env:LITAGENT_COMPACT_THRESHOLD=3000
 # 5) 三阶段工作流：产物写 workspace/<session>/workflow/
 python main.py --workflow "LLM agent memory 的研究现状"
 
+# 5b) 指定模式与档位（默认 deep/low；档位决定目标篇数与 Collect 轮数）
+python main.py --workflow --mode deep --level mid "LLM agent memory 的研究现状"
+#    survey 模式已预留参数解析，但流程要到第 11 步才实现，当前会明确报错
+
 # 6) 阶段失败后接着跑（跳过已落盘的 plan/evidence/outline）
 $env:LLM_TIMEOUT=300   # 报告这类长输出容易撞默认超时
 python main.py --workflow --resume "同一主题"
@@ -128,6 +136,7 @@ python main.py --web --port 8000
 - **Web 界面**：`python main.py --web` 启动后浏览器实测无控制台报错，空态、历史产物（wf-real 12 条证据）与报告引用芯片渲染正常；用 `resume=true` 只跑 report，SSE 依次收到 plan/collect/outline `skipped`、report `start`、`submit_report` 工具调用、report `done`（14,996 tokens）与 `finished`，共 12 条事件；`/api/result` 返回新报告 5,636 字、引用自检 0 问题。
 - **失败态修复（2026-11-07）**：用错误 key 起 8124 测试实例，SSE 事件为 `plan start → agent_start → turn → phase plan failed → error → finished(ok=false)`；浏览器实测「规划」卡片标红、提示 401，其余阶段保持等待，控制台零报错。旧行为只会发 `error`/`finished`，卡片永远停在「进行中」。
 - **年份约束修复（2026-11-07）**：真实复现「2026 年智能体记忆机制前沿进展」被规划成 `arXiv 2024–2026`；定位为 `plan.md` 只要求写时间范围、`system.md` 又有「优先近 2-3 年」偏好，模型据此自行放宽。已在 `plan.md` 增加「明确年份必须原样沿用」规则；**尚未复跑真实主题验证**，下次运行 plan 时要检查 `topic_boundary` 是否还与主题年份一致。
+- **第 10 步（2026-11-14）**：离线验证 17 项——六种组合的 `target_min/target_max/read_k/max_turns` 全部符合 `DESIGN.md` §2.2、非法组合与空主题报错、`survey` 拒绝清单导入、`_validate_collect` 在 `target_min=5/10` 下行为正确、`run_workflow` 传字符串等价 `deep/low`、phase 事件带 `mode/level/target_min`、`survey` 模式明确报「第 11 步」；真实 `--workflow --resume --mode deep --level low` 只跑 report（9,790 tokens），档位日志与 resume 行为正常。Web 侧 `POST /api/run` 的 `mode/level` 透传与非法组合 400 也已验证。
 
 ## 八、已知限制与坑
 
@@ -149,10 +158,12 @@ python main.py --web --port 8000
 
 ## 九、下一步（按建议顺序）
 
-1. **Skills（原第 6 步后半，也是唯一还欠的框架能力）**。`litagent/prompt/skills/*/SKILL.md` + `load_skill` 工具做渐进式披露：主提示词只放索引，按需加载全文。参考 pi 的 `skills.ts`、`resource-loader.ts`。验收：开/关 skills 的产出可对比，引用格式统一。
-2. **第 9 步：评测（交互部分已完成）**。golden set（10 个主题 + 期望覆盖的关键工作）、指标（候选召回 / 引用真实率 / 证据覆盖率 / 工具失败率 / 成本），把 `%TEMP%` 里的验证脚本固化进 `tests/`；Web 界面已提供阶段进度、实时事件流与产物阅读，可直接复用其事件数据做展示层回归。
-3. **增强检索**：Semantic Scholar 引文滚雪球（注意限速，建议申请 key）、跨会话文献库、去重。
-4. **工作流增强**（可选）：把 `--workflow` 的事件接进 `session.jsonl` 以支持 `--export`；collect 按论文拆子代理降低 23 万 tokens 的上下文成本；多主题运行时不覆盖旧产物。
+1. **第 11 步：仅搜集模式**（`ROADMAP.md` + `DESIGN.md` §2.3/§3）。`search_arxiv` 加分页与结构化错误 → `search_ladder.py` 做 L0–L3 逐级放宽 → `survey.py` 归集 `papers.jsonl` + `index.json` → `survey_plan.md` 只产出检索式。验收见 ROADMAP 第 11 步与 DESIGN G2/G4；`RunSpec` 与 `--mode survey` 的入口已就绪，把 `run_workflow` 的 `survey` 未实现分支替换掉即可。
+2. **第 12 步：深度分层**（候选集 + Select Top-K + 精读调度），再按第 13 步做清单导入、第 14 步做 Web 集成与评测基线。
+3. **Skills（原第 6 步后半）**。`litagent/prompt/skills/*/SKILL.md` + `load_skill` 工具做渐进式披露：主提示词只放索引，按需加载全文。参考 pi 的 `skills.ts`、`resource-loader.ts`。验收：开/关 skills 的产出可对比，引用格式统一。
+4. **第 9 步：评测**。golden set（10 个主题 + 期望覆盖的关键工作）、指标（候选召回 / 引用真实率 / 证据覆盖率 / 工具失败率 / 成本），把 `%TEMP%` 里的验证脚本固化进 `tests/`；Web 界面已提供阶段进度、实时事件流与产物阅读，可直接复用其事件数据做展示层回归。
+5. **增强检索**：Semantic Scholar 引文滚雪球（注意限速，建议申请 key）、跨会话文献库、去重。
+6. **工作流增强**（可选）：把 `--workflow` 的事件接进 `session.jsonl` 以支持 `--export`；collect 按论文拆子代理降低 23 万 tokens 的上下文成本；多主题运行时不覆盖旧产物。
 
 ## 十、给接手者的四句话
 

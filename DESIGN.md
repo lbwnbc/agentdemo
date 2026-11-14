@@ -189,9 +189,9 @@ flowchart TD
 | 结构化提交协议 | `submit_plan` / `submit_evidence` / `submit_outline` / `submit_report` 直接写 `StageStore`，不解析模型自由文本 | 已实现 |
 | 阶段产物契约 | `plan.json` / `evidence.jsonl` / `outline.md` / `report.md` + `resume` 跳过已完成阶段 | 已实现 |
 | 引用结构校验 | `validate_citations` + 首次失败重写、二次失败 `degraded` 保留报告 | 已实现 |
-| Collect 下限校验 | 论文数去重 + 子问题覆盖 + 总量下限，不达标走阶段重试 | 已实现（阈值硬编码 5，待档位化） |
+| Collect 下限校验 | 论文数去重 + 子问题覆盖 + 总量下限，不达标走阶段重试 | 已实现（下限由档位 `target_min` 驱动） |
 | 零依赖本地 Web | 标准库 HTTP + SSE + 自包含单页，无框架无构建 | 已实现 |
-| **两模式 × 三档位契约** | survey / deep × low/mid/high，档位绑定目标篇数、阶段预算、精读上限 | 计划（M1） |
+| **两模式 × 三档位契约** | survey / deep × low/mid/high，档位绑定目标篇数、阶段预算、精读上限 | 已实现（M1：`run_spec.py`，survey 流程待第 11 步） |
 | **逐级放宽兜底** | L0 原式 → L1 拆 AND → L2 同义词 → L3 分类浏览，记录 `query_level`，用尽标 `partial` | 计划（M2） |
 | **清单作为一等公民** | `surveys/{id}/papers.jsonl` + `index.json` 注册表，清单由代码归集不逐条过模型 | 计划（M2） |
 | **清单导入** | 深度调研按 `survey_id` 导入 1–3 份，候选池严格限定、不自动补检 | 计划（M3） |
